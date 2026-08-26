@@ -1,0 +1,1022 @@
+import { useState } from 'react';
+import { useAuth } from '../app/AuthContext.js';
+import { StepUpDialog } from '../components/StepUpDialog.js';
+import { Page } from '../components/Page.js';
+import { EmptyState, ErrorState, LoadingState, StatusBadge } from '../components/States.js';
+import { api, type BasOverview } from '../core/api.js';
+import { formatDate, formatMoney } from '../core/format.js';
+import { useAsync } from '../core/useAsync.js';
+
+interface Business {
+  id: string;
+  name: string;
+  legalName?: string;
+  businessType?: string;
+  rcNumber?: string;
+  intendedUseCase?: string;
+  email: string;
+  phone?: string;
+  website?: string;
+  status: string;
+  statusReason?: string;
+  reviewedAt?: string;
+  environment: string;
+  apiAccessStatus: string;
+  rateLimitTier: string;
+  paymentMethod?: string;
+  deliveryType?: string;
+  createdAt: string;
+  updatedAt: string;
+  directors: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    email: string;
+    idNumber: string;
+  }>;
+  storedAssets: Array<{
+    id: string;
+    directorId?: string;
+    kind: string;
+    filename?: string;
+    mimeType: string;
+    byteSize: number;
+    createdAt: string;
+  }>;
+}
+interface BusinessDocument {
+  id: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  contentBase64: string;
+}
+interface Order {
+  id: string;
+  clientReferenceId: string;
+  publicTrackingCode: string;
+  status: string;
+  deliveryType: string;
+  quotedAmount: string;
+  currency: string;
+  createdAt: string;
+  business: { name: string };
+}
+interface Wallet {
+  id: string;
+  status: string;
+  environment: string;
+  currency: string;
+  currentBalance: string;
+  reservedBalance: string;
+  updatedAt: string;
+  business: { name: string; email: string };
+}
+interface PricingVersion {
+  id: string;
+  scope: string;
+  version: number;
+  status: string;
+  currency: string;
+  minimumDeliveryPrice?: string;
+  activatedAt?: string;
+  createdAt: string;
+  profile?: { name: string; business: { name: string } };
+}
+interface Transaction {
+  id: string;
+  type: string;
+  category: string;
+  status: string;
+  amount: string;
+  currency: string;
+  referenceId?: string;
+  correlationId?: string;
+  createdAt: string;
+  business: { name: string };
+}
+interface Invoice {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  dueAt: string;
+  currency: string;
+  subtotal: string;
+  paidAmount: string;
+  status: string;
+  billingCycle: string;
+  createdAt: string;
+  business: { name: string };
+}
+interface ApiKeyRecord {
+  id: string;
+  publicKey: string;
+  environment: string;
+  status: string;
+  expiresAt?: string;
+  lastUsedAt?: string;
+  scheduledRotationAt?: string;
+  createdAt: string;
+  business: { name: string };
+}
+interface WebhookDelivery {
+  id: string;
+  correlationId: string;
+  status: string;
+  attempts: number;
+  responseStatus?: number;
+  failureReason?: string;
+  deliveredAt?: string;
+  deadLetteredAt?: string;
+  createdAt: string;
+  endpoint: { id: string; url: string; enabled: boolean; business: { name: string } };
+}
+interface PlatformAudit {
+  id: string;
+  action: string;
+  entity: string;
+  entityId?: string;
+  requestId?: string;
+  createdAt: string;
+}
+
+export function BasOverviewPage() {
+  const result = useAsync(
+    () => api.operation<BasOverview>('business-as-a-service', 'overview'),
+    [],
+  );
+  return (
+    <Page
+      eyebrow="Business as a Service"
+      title="Platform overview"
+      description="Tenant, fulfillment, and financial posture through the isolated BAS admin contract."
+    >
+      {result.loading ? (
+        <LoadingState />
+      ) : result.error || !result.data ? (
+        <ErrorState error={result.error ?? new Error('No data')} retry={result.reload} />
+      ) : (
+        <div className="metric-grid">
+          <article className="metric">
+            <span>Total businesses</span>
+            <strong>{result.data.businesses.total}</strong>
+            <small>{result.data.businesses.pendingReview} pending review</small>
+          </article>
+          <article className="metric">
+            <span>Total orders</span>
+            <strong>{result.data.orders.total}</strong>
+            <small>{result.data.orders.active} active now</small>
+          </article>
+          <article className="metric">
+            <span>Order exceptions</span>
+            <strong>{result.data.orders.exceptions}</strong>
+            <small>Require investigation</small>
+          </article>
+          <article className="metric">
+            <span>Wallet balance</span>
+            <strong>{formatMoney(result.data.finance.walletBalance)}</strong>
+            <small>{formatMoney(result.data.finance.reservedBalance)} reserved</small>
+          </article>
+        </div>
+      )}
+    </Page>
+  );
+}
+
+export function BusinessesPage() {
+  const auth = useAuth();
+  const result = useAsync(
+    () => api.operation<Business[]>('business-as-a-service', 'businesses'),
+    [],
+  );
+  const [review, setReview] = useState<Business>();
+  const [error, setError] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState(false);
+  const [stepUp, setStepUp] = useState(false);
+  const submit = async (status: string, reason: string) => {
+    if (!review) return;
+    try {
+      await api.mutate('business-as-a-service', 'businesses-review', reason, {
+        businessId: review.id,
+        status,
+      });
+      setReview(undefined);
+      await result.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Review failed');
+    }
+  };
+  return (
+    <Page
+      eyebrow="Business as a Service"
+      title="Businesses"
+      description="Review tenant identity, operational status, environment, and API access."
+      action={
+        auth.can('bas.businesses.review') ? (
+          <div className="inline-actions">
+            <button className="button secondary" onClick={() => setStepUp(true)}>
+              Verify MFA
+            </button>
+            <button
+              className="button primary"
+              disabled={!selectedIds.size}
+              onClick={() => setBulk(true)}
+            >
+              Review selected ({selectedIds.size})
+            </button>
+          </div>
+        ) : undefined
+      }
+    >
+      {result.loading ? (
+        <LoadingState />
+      ) : result.error ? (
+        <ErrorState error={result.error} retry={result.reload} />
+      ) : !result.data?.length ? (
+        <EmptyState title="No businesses" description="BAS tenants will appear here." />
+      ) : (
+        <div className="table-panel">
+          <table aria-label="Businesses">
+            <thead>
+              <tr>
+                <th>
+                  <span className="sr-only">Select</span>
+                </th>
+                <th>Business</th>
+                <th>Status</th>
+                <th>Environment</th>
+                <th>API access</th>
+                <th>Joined</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {result.data.map((business) => (
+                <tr key={business.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${business.name}`}
+                      checked={selectedIds.has(business.id)}
+                      onChange={(event) =>
+                        setSelectedIds((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(business.id);
+                          else next.delete(business.id);
+                          return next;
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <strong>{business.name}</strong>
+                    <small>{business.email}</small>
+                  </td>
+                  <td>
+                    <StatusBadge value={business.status} />
+                  </td>
+                  <td>{business.environment}</td>
+                  <td>
+                    <StatusBadge value={business.apiAccessStatus} />
+                  </td>
+                  <td>{formatDate(business.createdAt)}</td>
+                  <td>
+                    {auth.can('bas.businesses.review') && (
+                      <button className="text-link" onClick={() => setReview(business)}>
+                        Review
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {review && (
+        <ReviewDialog
+          business={review}
+          error={error}
+          close={() => {
+            setReview(undefined);
+            setError('');
+          }}
+          submit={submit}
+        />
+      )}
+      {bulk && (
+        <BulkReviewDialog
+          businesses={result.data?.filter(({ id }) => selectedIds.has(id)) ?? []}
+          close={() => setBulk(false)}
+          completed={async () => {
+            setBulk(false);
+            setSelectedIds(new Set());
+            await result.reload();
+          }}
+        />
+      )}
+      {stepUp && <StepUpDialog close={() => setStepUp(false)} />}
+    </Page>
+  );
+}
+
+function BulkReviewDialog({
+  businesses,
+  close,
+  completed,
+}: {
+  businesses: Business[];
+  close(): void;
+  completed(): Promise<void>;
+}) {
+  const [status, setStatus] = useState('APPROVED');
+  const [reason, setReason] = useState('');
+  const [preview, setPreview] = useState<{
+    canExecute: boolean;
+    items: Array<{
+      businessId: string;
+      name?: string;
+      from?: string;
+      to: string;
+      valid: boolean;
+      issue?: string;
+    }>;
+    compensation: string;
+  }>();
+  const [error, setError] = useState('');
+  const payload = () => ({ items: businesses.map(({ id }) => ({ businessId: id, status })) });
+  const loadPreview = async () => {
+    try {
+      setPreview(
+        await api.mutate(
+          'business-as-a-service',
+          'businesses-bulk-review-preview',
+          reason,
+          payload(),
+        ),
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Preview failed');
+    }
+  };
+  const execute = async () => {
+    try {
+      await api.mutate('business-as-a-service', 'businesses-bulk-review', reason, payload());
+      await completed();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Bulk review failed');
+    }
+  };
+  return (
+    <div className="modal-backdrop">
+      <div
+        className="modal modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Bulk business review"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Preview required</p>
+            <h2>Review {businesses.length} businesses</h2>
+          </div>
+          <button className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        {error && <div className="form-error">{error}</div>}
+        <label>
+          Target status
+          <select
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPreview(undefined);
+            }}
+          >
+            <option>APPROVED</option>
+            <option>UNDER_REVIEW</option>
+            <option>REJECTED</option>
+            <option>SUSPENDED</option>
+          </select>
+        </label>
+        <label>
+          Business reason
+          <textarea
+            minLength={8}
+            value={reason}
+            onChange={(event) => {
+              setReason(event.target.value);
+              setPreview(undefined);
+            }}
+            required
+          />
+        </label>
+        {preview && (
+          <div className="bulk-preview">
+            <strong>
+              {preview.canExecute ? 'Ready to execute' : 'Resolve invalid transitions'}
+            </strong>
+            {preview.items.map((item) => (
+              <p key={item.businessId}>
+                <StatusBadge value={item.valid ? 'valid' : 'invalid'} />{' '}
+                {item.name ?? item.businessId}: {item.from ?? 'missing'} → {item.to} {item.issue}
+              </p>
+            ))}
+            <small>{preview.compensation}</small>
+          </div>
+        )}
+        <footer>
+          {preview?.canExecute ? (
+            <button className="button danger" onClick={() => void execute()}>
+              Confirm queued review
+            </button>
+          ) : (
+            <button
+              className="button primary"
+              disabled={reason.trim().length < 8}
+              onClick={() => void loadPreview()}
+            >
+              Preview changes
+            </button>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function ReviewDialog({
+  business,
+  error,
+  close,
+  submit,
+}: {
+  business: Business;
+  error: string;
+  close(): void;
+  submit(status: string, reason: string): Promise<void>;
+}) {
+  const transitions: Record<string, string[]> = {
+    PENDING: ['UNDER_REVIEW', 'REJECTED'],
+    UNDER_REVIEW: ['APPROVED', 'REJECTED'],
+    APPROVED: ['SUSPENDED'],
+    REJECTED: ['UNDER_REVIEW'],
+    SUSPENDED: ['APPROVED'],
+  };
+  const availableStatuses = transitions[business.status] ?? [];
+  const [status, setStatus] = useState(availableStatuses[0] ?? business.status);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [document, setDocument] = useState<BusinessDocument>();
+  const [documentError, setDocumentError] = useState('');
+  const [loadingDocumentId, setLoadingDocumentId] = useState('');
+  const openDocument = async (assetId: string) => {
+    setLoadingDocumentId(assetId);
+    setDocumentError('');
+    try {
+      setDocument(
+        await api.operation<BusinessDocument>(
+          'business-as-a-service',
+          'business-document',
+          `?assetId=${encodeURIComponent(assetId)}`,
+        ),
+      );
+    } catch (cause) {
+      setDocumentError(cause instanceof Error ? cause.message : 'Document could not be opened');
+    } finally {
+      setLoadingDocumentId('');
+    }
+  };
+  const documentSource = document
+    ? `data:${document.mimeType};base64,${document.contentBase64}`
+    : undefined;
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Review business"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          void submit(status, reason).finally(() => setBusy(false));
+        }}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">High-risk action</p>
+            <h2>Review {business.name}</h2>
+          </div>
+          <button type="button" className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        {error && <div className="form-error">{error}</div>}
+        <section className="review-section">
+          <div className="review-section-heading">
+            <div>
+              <p className="eyebrow">Application</p>
+              <h3>Company information</h3>
+            </div>
+            <StatusBadge value={business.status} />
+          </div>
+          <dl className="review-details">
+            <div>
+              <dt>Legal name</dt>
+              <dd>{business.legalName ?? business.name}</dd>
+            </div>
+            <div>
+              <dt>Business type</dt>
+              <dd>{business.businessType?.replaceAll('_', ' ') ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Registration number</dt>
+              <dd>{business.rcNumber ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Contact</dt>
+              <dd>{business.email}</dd>
+              <dd>{business.phone ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Environment</dt>
+              <dd>{business.environment}</dd>
+            </div>
+            <div>
+              <dt>Submitted</dt>
+              <dd>{formatDate(business.createdAt)}</dd>
+            </div>
+          </dl>
+          {business.intendedUseCase && <p>{business.intendedUseCase}</p>}
+        </section>
+        <section className="review-section">
+          <p className="eyebrow">Identity</p>
+          <h3>Directors</h3>
+          <div className="director-list">
+            {business.directors.map((director) => (
+              <article key={director.id}>
+                <strong>{director.name}</strong>
+                <span>{director.email}</span>
+                <span>{director.phone}</span>
+                <small>ID ending {director.idNumber}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="review-section">
+          <p className="eyebrow">Evidence</p>
+          <h3>Uploaded documents</h3>
+          {documentError && <div className="form-error">{documentError}</div>}
+          <div className="document-list">
+            {business.storedAssets.map((asset) => (
+              <article key={asset.id}>
+                <div>
+                  <strong>{asset.kind.replaceAll('_', ' ')}</strong>
+                  <small>
+                    {asset.filename ?? 'Uploaded document'} · {Math.ceil(asset.byteSize / 1024)} KB
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="text-link"
+                  disabled={Boolean(loadingDocumentId)}
+                  onClick={() => void openDocument(asset.id)}
+                >
+                  {loadingDocumentId === asset.id ? 'Opening…' : 'View'}
+                </button>
+              </article>
+            ))}
+            {!business.storedAssets.length && <p>No uploaded documents were found.</p>}
+          </div>
+          {document && documentSource && (
+            <div className="document-preview">
+              <header>
+                <strong>{document.filename}</strong>
+                <div className="inline-actions">
+                  <a className="text-link" href={documentSource} download={document.filename}>
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() => setDocument(undefined)}
+                  >
+                    Close preview
+                  </button>
+                </div>
+              </header>
+              {document.mimeType.startsWith('image/') ? (
+                <img src={documentSource} alt={document.filename} />
+              ) : (
+                <iframe
+                  title={document.filename}
+                  src={documentSource}
+                  sandbox="allow-same-origin"
+                />
+              )}
+            </div>
+          )}
+        </section>
+        <label>
+          Decision
+          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            {availableStatuses.map((value) => (
+              <option key={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Decision reason
+          <textarea
+            minLength={8}
+            required
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <p className="risk-note">
+          This decision is enforced in BAS and recorded in both audit trails.
+        </p>
+        <footer>
+          <button type="button" className="button secondary" onClick={close}>
+            Cancel
+          </button>
+          <button className="button danger" disabled={busy}>
+            {busy ? 'Applying…' : 'Confirm decision'}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+export function OrdersPage() {
+  const result = useAsync(() => api.operation<Order[]>('business-as-a-service', 'orders'), []);
+  return (
+    <DataPage
+      title="Orders"
+      description="Cross-tenant fulfillment activity and exceptions."
+      result={result}
+      headers={['Reference', 'Business', 'Status', 'Delivery', 'Amount', 'Created']}
+      row={(order) => (
+        <>
+          <td>
+            <strong>{order.clientReferenceId}</strong>
+            <small>{order.publicTrackingCode}</small>
+          </td>
+          <td>{order.business.name}</td>
+          <td>
+            <StatusBadge value={order.status} />
+          </td>
+          <td>{order.deliveryType}</td>
+          <td>{formatMoney(Number(order.quotedAmount), order.currency)}</td>
+          <td>{formatDate(order.createdAt)}</td>
+        </>
+      )}
+    />
+  );
+}
+export function FinancePage() {
+  const result = useAsync(() => api.operation<Wallet[]>('business-as-a-service', 'finance'), []);
+  return (
+    <DataPage
+      title="Finance"
+      description="Wallet exposure across BAS tenants. Adjustments require a separate critical-risk capability."
+      result={result}
+      headers={['Business', 'Environment', 'Status', 'Balance', 'Reserved', 'Updated']}
+      row={(wallet) => (
+        <>
+          <td>
+            <strong>{wallet.business.name}</strong>
+            <small>{wallet.business.email}</small>
+          </td>
+          <td>{wallet.environment}</td>
+          <td>
+            <StatusBadge value={wallet.status} />
+          </td>
+          <td>{formatMoney(Number(wallet.currentBalance), wallet.currency)}</td>
+          <td>{formatMoney(Number(wallet.reservedBalance), wallet.currency)}</td>
+          <td>{formatDate(wallet.updatedAt)}</td>
+        </>
+      )}
+    />
+  );
+}
+
+export function PricingPage() {
+  const result = useAsync(
+    () => api.operation<PricingVersion[]>('business-as-a-service', 'pricing'),
+    [],
+  );
+  return (
+    <DataPage
+      title="Pricing"
+      description="Active and historical pricing configurations across platform and tenant scopes."
+      result={result}
+      headers={['Scope', 'Profile', 'Version', 'Status', 'Minimum', 'Activated']}
+      row={(item) => (
+        <>
+          <td>{item.scope}</td>
+          <td>
+            {item.profile
+              ? `${item.profile.business.name} · ${item.profile.name}`
+              : 'Platform default'}
+          </td>
+          <td>v{item.version}</td>
+          <td>
+            <StatusBadge value={item.status} />
+          </td>
+          <td>
+            {item.minimumDeliveryPrice
+              ? formatMoney(Number(item.minimumDeliveryPrice), item.currency)
+              : '—'}
+          </td>
+          <td>{item.activatedAt ? formatDate(item.activatedAt) : 'Not active'}</td>
+        </>
+      )}
+    />
+  );
+}
+
+export function TransactionsPage() {
+  const result = useAsync(
+    () => api.operation<Transaction[]>('business-as-a-service', 'transactions'),
+    [],
+  );
+  return (
+    <DataPage
+      title="Transactions"
+      description="Read-only financial movement history with destination correlation references."
+      result={result}
+      headers={['Business', 'Type', 'Category', 'Status', 'Amount', 'Created']}
+      row={(item) => (
+        <>
+          <td>{item.business.name}</td>
+          <td>{item.type}</td>
+          <td>{item.category}</td>
+          <td>
+            <StatusBadge value={item.status} />
+          </td>
+          <td>{formatMoney(Number(item.amount), item.currency)}</td>
+          <td>{formatDate(item.createdAt)}</td>
+        </>
+      )}
+    />
+  );
+}
+
+export function InvoicesPage() {
+  const result = useAsync(() => api.operation<Invoice[]>('business-as-a-service', 'invoices'), []);
+  return (
+    <DataPage
+      title="Invoices"
+      description="Billing exposure and due-date status across BAS tenants."
+      result={result}
+      headers={['Business', 'Cycle', 'Status', 'Subtotal', 'Paid', 'Due']}
+      row={(item) => (
+        <>
+          <td>{item.business.name}</td>
+          <td>{item.billingCycle}</td>
+          <td>
+            <StatusBadge value={item.status} />
+          </td>
+          <td>{formatMoney(Number(item.subtotal), item.currency)}</td>
+          <td>{formatMoney(Number(item.paidAmount), item.currency)}</td>
+          <td>{formatDate(item.dueAt)}</td>
+        </>
+      )}
+    />
+  );
+}
+
+export function IntegrationsPage() {
+  const keys = useAsync(
+    () => api.operation<ApiKeyRecord[]>('business-as-a-service', 'api-keys'),
+    [],
+  );
+  const webhooks = useAsync(
+    () => api.operation<WebhookDelivery[]>('business-as-a-service', 'webhooks'),
+    [],
+  );
+  const [selected, setSelected] = useState<WebhookDelivery>();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const replay = async () => {
+    if (!selected) return;
+    try {
+      await api.mutate('business-as-a-service', 'webhooks-replay', reason, {
+        deliveryId: selected.id,
+      });
+      setSelected(undefined);
+      setReason('');
+      await webhooks.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Replay failed');
+    }
+  };
+  return (
+    <Page
+      eyebrow="Business as a Service"
+      title="API keys and webhooks"
+      description="Credential lifecycle metadata and webhook delivery support. Secret material is never returned."
+    >
+      <h2>API keys</h2>
+      {keys.loading ? (
+        <LoadingState />
+      ) : keys.error ? (
+        <ErrorState error={keys.error} retry={keys.reload} />
+      ) : (
+        <div className="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Business</th>
+                <th>Key</th>
+                <th>Environment</th>
+                <th>Status</th>
+                <th>Last used</th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.data?.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.business.name}</td>
+                  <td>
+                    <code>{item.publicKey}</code>
+                  </td>
+                  <td>{item.environment}</td>
+                  <td>
+                    <StatusBadge value={item.status} />
+                  </td>
+                  <td>{item.lastUsedAt ? formatDate(item.lastUsedAt) : 'Never'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <h2 className="section-title">Webhook deliveries</h2>
+      {webhooks.loading ? (
+        <LoadingState />
+      ) : webhooks.error ? (
+        <ErrorState error={webhooks.error} retry={webhooks.reload} />
+      ) : (
+        <div className="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Business</th>
+                <th>Endpoint</th>
+                <th>Status</th>
+                <th>Attempts</th>
+                <th>Created</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {webhooks.data?.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.endpoint.business.name}</td>
+                  <td>
+                    <code>{new URL(item.endpoint.url).host}</code>
+                  </td>
+                  <td>
+                    <StatusBadge value={item.status} />
+                  </td>
+                  <td>{item.attempts}</td>
+                  <td>{formatDate(item.createdAt)}</td>
+                  <td>
+                    {['COMPLETED', 'DEAD'].includes(item.status) && (
+                      <button className="text-link" onClick={() => setSelected(item)}>
+                        Replay
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {selected && (
+        <div className="modal-backdrop">
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Replay webhook delivery"
+          >
+            <header>
+              <div>
+                <p className="eyebrow">High-risk support action</p>
+                <h2>Replay webhook delivery</h2>
+              </div>
+              <button className="icon-control" onClick={() => setSelected(undefined)}>
+                ×
+              </button>
+            </header>
+            {error && <div className="form-error">{error}</div>}
+            <p>
+              This requeues delivery <code>{selected.id}</code> for{' '}
+              {selected.endpoint.business.name}. Recent MFA verification is required.
+            </p>
+            <label>
+              Business reason
+              <textarea
+                minLength={8}
+                required
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+            <footer>
+              <button
+                className="button danger"
+                disabled={reason.trim().length < 8}
+                onClick={() => void replay()}
+              >
+                Confirm replay
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+    </Page>
+  );
+}
+
+export function PlatformAuditPage() {
+  const result = useAsync(
+    () => api.operation<PlatformAudit[]>('business-as-a-service', 'audit'),
+    [],
+  );
+  return (
+    <DataPage
+      title="Platform audit"
+      description="BAS-owned audit evidence correlated with control-plane request identifiers."
+      result={result}
+      headers={['Action', 'Entity', 'Entity ID', 'Request ID', 'Occurred']}
+      row={(item) => (
+        <>
+          <td>
+            <strong>{item.action}</strong>
+          </td>
+          <td>{item.entity}</td>
+          <td>
+            <code>{item.entityId?.slice(0, 12) ?? '—'}</code>
+          </td>
+          <td>
+            <code>{item.requestId?.slice(0, 12) ?? '—'}</code>
+          </td>
+          <td>{formatDate(item.createdAt)}</td>
+        </>
+      )}
+    />
+  );
+}
+
+function DataPage<T extends { id: string }>({
+  title,
+  description,
+  result,
+  headers,
+  row,
+}: {
+  title: string;
+  description: string;
+  result: ReturnType<typeof useAsync<T[]>>;
+  headers: string[];
+  row(value: T): React.ReactNode;
+}) {
+  return (
+    <Page eyebrow="Business as a Service" title={title} description={description}>
+      {result.loading ? (
+        <LoadingState />
+      ) : result.error ? (
+        <ErrorState error={result.error} retry={result.reload} />
+      ) : !result.data?.length ? (
+        <EmptyState title={`No ${title.toLowerCase()}`} description="No records match this view." />
+      ) : (
+        <div className="table-panel">
+          <table aria-label={`${title} records`}>
+            <thead>
+              <tr>
+                {headers.map((header) => (
+                  <th key={header}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.data.map((value) => (
+                <tr key={value.id}>{row(value)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Page>
+  );
+}

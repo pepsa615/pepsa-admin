@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+contracts/releases/
+src/services/admin-api/generated.ts
+playwright-report/
+test-results/
