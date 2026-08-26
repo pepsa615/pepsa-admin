@@ -158,6 +158,7 @@ describe('admin authentication boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue securely' }));
     expect(await screen.findByText('First-time setup')).toBeVisible();
     expect(screen.getByText('Enter a setup key instead')).toBeVisible();
+    expect(screen.getByLabelText('Authenticator code')).toHaveValue('');
     fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: 'Verify and sign in' }));
     expect(await screen.findByRole('heading', { name: 'Save your recovery codes' })).toBeVisible();

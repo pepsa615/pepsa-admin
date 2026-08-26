@@ -85,7 +85,7 @@ export function LoginPage() {
         <p className="auth-footnote">Authorized personnel only · All activity is monitored</p>
       </section>
       <section className="auth-panel">
-        <form className="auth-card" onSubmit={submit}>
+        <form key={stage} className="auth-card" onSubmit={submit}>
           <div>
             <p className="eyebrow">
               {stage === 'password'
