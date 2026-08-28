@@ -16,6 +16,10 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      SSH_OPTS: -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,15 +34,14 @@ jobs:
           VITE_ADMIN_API_BASE_URL: ${{ vars.VITE_ADMIN_API_BASE_URL }}
       - name: Package static release
         run: tar -czf "/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz" -C dist .
+      - name: Load deploy SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
       - name: Upload and activate release
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_SSH_KEY"
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          scp -o StrictHostKeyChecking=accept-new "/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz" "$DEPLOY_USER@$DEPLOY_HOST:/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz"
-          ssh -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "set -e; deploy_root=\"\${HOME}/var/www/admin\"; mkdir -p \"\${deploy_root}/releases/${GITHUB_SHA}/dist\"; tar -xzf '/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz' -C \"\${deploy_root}/releases/${GITHUB_SHA}/dist\"; ln -sfn \"\${deploy_root}/releases/${GITHUB_SHA}\" \"\${deploy_root}/current\"; echo 'Activated admin frontend ${GITHUB_SHA}'"
+          test -n "$DEPLOY_HOST" || (echo "Missing DEPLOY_HOST repository secret" >&2 && exit 1)
+          test -n "$DEPLOY_USER" || (echo "Missing DEPLOY_USER repository secret" >&2 && exit 1)
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "echo connected as \$(whoami) on \$(hostname)"
+          scp $SSH_OPTS "/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz" "$DEPLOY_USER@$DEPLOY_HOST:/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz"
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "set -euxo pipefail; deploy_root=\"\${HOME}/var/www/admin\"; mkdir -p \"\${deploy_root}/releases/${GITHUB_SHA}/dist\"; tar -xzf '/tmp/pepsa-admin-ui-${GITHUB_SHA}.tar.gz' -C \"\${deploy_root}/releases/${GITHUB_SHA}/dist\"; ln -sfn \"\${deploy_root}/releases/${GITHUB_SHA}\" \"\${deploy_root}/current\"; echo 'Activated admin frontend ${GITHUB_SHA}'"
