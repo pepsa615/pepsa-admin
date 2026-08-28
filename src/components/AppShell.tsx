@@ -153,7 +153,7 @@ export function AppShell() {
             <NotificationsMenu />
           </div>
         </header>
-        <Outlet />
+        <Outlet key={`${selectedPlatform?.key ?? 'global'}:${environment}`} />
       </main>
     </div>
   );

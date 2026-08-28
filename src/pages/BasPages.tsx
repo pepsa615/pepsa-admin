@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../app/AuthContext.js';
 import { StepUpDialog } from '../components/StepUpDialog.js';
 import { Page } from '../components/Page.js';
@@ -6,6 +7,21 @@ import { EmptyState, ErrorState, LoadingState, StatusBadge } from '../components
 import { api, type BasOverview } from '../core/api.js';
 import { formatDate, formatMoney } from '../core/format.js';
 import { useAsync } from '../core/useAsync.js';
+
+function useDebouncedValue<T>(value: T, delayMs = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+function businessesQuery(search: string) {
+  const trimmed = search.trim();
+  if (!trimmed) return '';
+  return `?${new URLSearchParams({ q: trimmed })}`;
+}
 
 interface Business {
   id: string;
@@ -81,7 +97,35 @@ interface PricingVersion {
   minimumDeliveryPrice?: string;
   activatedAt?: string;
   createdAt: string;
-  profile?: { name: string; business: { name: string } };
+  recordType?: 'VERSION' | 'OVERRIDE';
+  perKmRate?: string;
+  profile?: { name: string; business: { id: string; name: string } };
+}
+interface PricingWorkbookReport {
+  valid: boolean;
+  summary: {
+    stateCount: number;
+    enabledRateCount: number;
+    ignoredDisabledRateCount: number;
+    discountTierCount: number;
+    interstateRouteCount: number;
+    interstateWeightBandCount: number;
+    ignoredDisabledInterstateBandCount: number;
+  };
+  issues: Array<{
+    severity: 'ERROR' | 'WARNING';
+    code: string;
+    sheet: string;
+    row?: number;
+    message: string;
+  }>;
+}
+interface PricingWorkbookExport {
+  filename: string;
+  fileBase64: string;
+  versionId: string;
+  version: number;
+  status: string;
 }
 interface Transaction {
   id: string;
@@ -119,6 +163,16 @@ interface ApiKeyRecord {
   createdAt: string;
   business: { name: string };
 }
+interface WebhookEndpoint {
+  id: string;
+  environment: string;
+  url: string;
+  enabled: boolean;
+  eventTypes: string[];
+  verifiedAt?: string;
+  createdAt: string;
+  business: { name: string };
+}
 interface WebhookDelivery {
   id: string;
   correlationId: string;
@@ -129,7 +183,13 @@ interface WebhookDelivery {
   deliveredAt?: string;
   deadLetteredAt?: string;
   createdAt: string;
-  endpoint: { id: string; url: string; enabled: boolean; business: { name: string } };
+  endpoint: {
+    id: string;
+    url: string;
+    enabled: boolean;
+    environment: string;
+    business: { name: string };
+  };
 }
 interface PlatformAudit {
   id: string;
@@ -185,9 +245,16 @@ export function BasOverviewPage() {
 
 export function BusinessesPage() {
   const auth = useAuth();
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
   const result = useAsync(
-    () => api.operation<Business[]>('business-as-a-service', 'businesses'),
-    [],
+    () =>
+      api.operation<Business[]>(
+        'business-as-a-service',
+        'businesses',
+        businessesQuery(debouncedSearch),
+      ),
+    [debouncedSearch],
   );
   const [review, setReview] = useState<Business>();
   const [error, setError] = useState('');
@@ -229,12 +296,30 @@ export function BusinessesPage() {
         ) : undefined
       }
     >
+      <div className="filter-bar">
+        <label>
+          Search businesses
+          <input
+            aria-label="Search businesses"
+            placeholder="Name, email, phone, or RC number"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+      </div>
       {result.loading ? (
         <LoadingState />
       ) : result.error ? (
         <ErrorState error={result.error} retry={result.reload} />
       ) : !result.data?.length ? (
-        <EmptyState title="No businesses" description="BAS tenants will appear here." />
+        <EmptyState
+          title={debouncedSearch.trim() ? 'No matching businesses' : 'No businesses'}
+          description={
+            debouncedSearch.trim()
+              ? 'Try another name, email, phone, or RC number.'
+              : 'BAS tenants will appear here.'
+          }
+        />
       ) : (
         <div className="table-panel">
           <table aria-label="Businesses">
@@ -245,7 +330,7 @@ export function BusinessesPage() {
                 </th>
                 <th>Business</th>
                 <th>Status</th>
-                <th>Environment</th>
+                <th>Active context</th>
                 <th>API access</th>
                 <th>Joined</th>
                 <th />
@@ -282,11 +367,9 @@ export function BusinessesPage() {
                   </td>
                   <td>{formatDate(business.createdAt)}</td>
                   <td>
-                    {auth.can('bas.businesses.review') && (
-                      <button className="text-link" onClick={() => setReview(business)}>
-                        Review
-                      </button>
-                    )}
+                    <button className="text-link" onClick={() => setReview(business)}>
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -303,6 +386,7 @@ export function BusinessesPage() {
             setError('');
           }}
           submit={submit}
+          canReview={auth.can('bas.businesses.review')}
         />
       )}
       {bulk && (
@@ -452,12 +536,15 @@ function ReviewDialog({
   error,
   close,
   submit,
+  canReview,
 }: {
   business: Business;
   error: string;
   close(): void;
   submit(status: string, reason: string): Promise<void>;
+  canReview: boolean;
 }) {
+  const navigate = useNavigate();
   const transitions: Record<string, string[]> = {
     PENDING: ['UNDER_REVIEW', 'REJECTED'],
     UNDER_REVIEW: ['APPROVED', 'REJECTED'],
@@ -507,8 +594,8 @@ function ReviewDialog({
       >
         <header>
           <div>
-            <p className="eyebrow">High-risk action</p>
-            <h2>Review {business.name}</h2>
+            <p className="eyebrow">Business profile</p>
+            <h2>{business.name}</h2>
           </div>
           <button type="button" className="icon-control" onClick={close}>
             ×
@@ -542,7 +629,7 @@ function ReviewDialog({
               <dd>{business.phone ?? '—'}</dd>
             </div>
             <div>
-              <dt>Environment</dt>
+              <dt>User-selected context</dt>
               <dd>{business.environment}</dd>
             </div>
             <div>
@@ -620,33 +707,46 @@ function ReviewDialog({
             </div>
           )}
         </section>
-        <label>
-          Decision
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            {availableStatuses.map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Decision reason
-          <textarea
-            minLength={8}
-            required
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </label>
-        <p className="risk-note">
-          This decision is enforced in BAS and recorded in both audit trails.
-        </p>
+        {canReview && availableStatuses.length > 0 && (
+          <>
+            <label>
+              Decision
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                {availableStatuses.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Decision reason
+              <textarea
+                minLength={8}
+                required
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+            <p className="risk-note">
+              This decision is enforced in BAS and recorded in both audit trails.
+            </p>
+          </>
+        )}
         <footer>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => navigate(`/p/business-as-a-service/pricing?businessId=${business.id}`)}
+          >
+            View pricing
+          </button>
           <button type="button" className="button secondary" onClick={close}>
-            Cancel
+            Close
           </button>
-          <button className="button danger" disabled={busy}>
-            {busy ? 'Applying…' : 'Confirm decision'}
-          </button>
+          {canReview && availableStatuses.length > 0 && (
+            <button className="button danger" disabled={busy}>
+              {busy ? 'Applying…' : 'Confirm decision'}
+            </button>
+          )}
         </footer>
       </form>
     </div>
@@ -707,37 +807,577 @@ export function FinancePage() {
 }
 
 export function PricingPage() {
+  const auth = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
+  const [selectedBusiness, setSelectedBusiness] = useState<Business>();
+  const businesses = useAsync(
+    () =>
+      api.operation<Business[]>(
+        'business-as-a-service',
+        'businesses',
+        businessesQuery(debouncedSearch),
+      ),
+    [debouncedSearch],
+  );
   const result = useAsync(
     () => api.operation<PricingVersion[]>('business-as-a-service', 'pricing'),
     [],
   );
+  const [editing, setEditing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [versionChange, setVersionChange] = useState<{
+    version: PricingVersion;
+    operation: 'activate' | 'rollback';
+  }>();
+  const [error, setError] = useState('');
+  const businessId = searchParams.get('businessId') ?? '';
+  const business =
+    selectedBusiness?.id === businessId
+      ? selectedBusiness
+      : businesses.data?.find(({ id }) => id === businessId);
+  const businessOptions = [
+    ...(business && !businesses.data?.some(({ id }) => id === business.id) ? [business] : []),
+    ...(businesses.data ?? []),
+  ];
   return (
-    <DataPage
+    <Page
+      eyebrow="Business as a Service"
       title="Pricing"
-      description="Active and historical pricing configurations across platform and tenant scopes."
-      result={result}
-      headers={['Scope', 'Profile', 'Version', 'Status', 'Minimum', 'Activated']}
-      row={(item) => (
-        <>
-          <td>{item.scope}</td>
-          <td>
-            {item.profile
-              ? `${item.profile.business.name} · ${item.profile.name}`
-              : 'Platform default'}
-          </td>
-          <td>v{item.version}</td>
-          <td>
-            <StatusBadge value={item.status} />
-          </td>
-          <td>
-            {item.minimumDeliveryPrice
-              ? formatMoney(Number(item.minimumDeliveryPrice), item.currency)
-              : '—'}
-          </td>
-          <td>{item.activatedAt ? formatDate(item.activatedAt) : 'Not active'}</td>
-        </>
+      description="Inspect the platform price book and create audited business-specific rules."
+      action={
+        auth.can('bas.pricing.manage') ? (
+          <div className="button-row">
+            <button
+              className="button secondary"
+              disabled={exporting}
+              onClick={() => {
+                setExporting(true);
+                setError('');
+                void api
+                  .operation<PricingWorkbookExport>(
+                    'business-as-a-service',
+                    'pricing-export',
+                  )
+                  .then((exported) => downloadBase64Workbook(exported))
+                  .catch((cause) =>
+                    setError(cause instanceof Error ? cause.message : 'Pricing export failed'),
+                  )
+                  .finally(() => setExporting(false));
+              }}
+            >
+              {exporting ? 'Preparing…' : 'Download active price book'}
+            </button>
+            <button className="button secondary" onClick={() => setImporting(true)}>
+              Import price book
+            </button>
+            <button
+              className="button primary"
+              disabled={!businessId}
+              onClick={() => setEditing(true)}
+            >
+              Add pricing rule
+            </button>
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="filter-bar">
+        <label>
+          Search businesses
+          <input
+            aria-label="Search businesses"
+            placeholder="Name, email, phone, or RC number"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <label>
+          Business account
+          <select
+            value={businessId}
+            onChange={(event) => {
+              const next = new URLSearchParams(searchParams);
+              const nextId = event.target.value;
+              if (nextId) {
+                next.set('businessId', nextId);
+                setSelectedBusiness(
+                  businessOptions.find(({ id }) => id === nextId) ?? selectedBusiness,
+                );
+              } else {
+                next.delete('businessId');
+                setSelectedBusiness(undefined);
+              }
+              setSearchParams(next);
+            }}
+          >
+            <option value="">All businesses</option>
+            {businessOptions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {business && <span className="filter-summary">Viewing rules for {business.name}</span>}
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {result.loading || businesses.loading ? (
+        <LoadingState />
+      ) : result.error || businesses.error ? (
+        <ErrorState error={result.error ?? businesses.error!} retry={result.reload} />
+      ) : !result.data?.length ? (
+        <EmptyState
+          title="No pricing versions"
+          description="Select a business and add a rule, or configure a platform price book."
+        />
+      ) : (
+        <div className="table-panel">
+          <table aria-label="Pricing records">
+            <thead>
+              <tr>
+                {['Scope', 'Profile', 'Version', 'Status', 'Minimum', 'Activated', 'Actions'].map(
+                  (header) => (
+                    <th key={header}>{header}</th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {result.data
+                .filter(
+                  (item) =>
+                    !businessId || item.profile?.business.id === businessId || !item.profile,
+                )
+                .map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.scope}</td>
+                    <td>
+                      {item.profile
+                        ? `${item.profile.business.name} · ${item.profile.name}`
+                        : 'Platform default'}
+                    </td>
+                    <td>{item.recordType === 'OVERRIDE' ? 'Override' : `v${item.version}`}</td>
+                    <td>
+                      <StatusBadge value={item.status} />
+                    </td>
+                    <td>
+                      {item.minimumDeliveryPrice
+                        ? formatMoney(Number(item.minimumDeliveryPrice), item.currency)
+                        : item.perKmRate
+                          ? `${formatMoney(Number(item.perKmRate), item.currency)} / km`
+                          : '—'}
+                    </td>
+                    <td>{item.activatedAt ? formatDate(item.activatedAt) : 'Not active'}</td>
+                    <td>
+                      {auth.can('bas.pricing.manage') &&
+                      item.recordType !== 'OVERRIDE' &&
+                      item.status === 'DRAFT' ? (
+                        <button
+                          className="button secondary small"
+                          onClick={() => setVersionChange({ version: item, operation: 'activate' })}
+                        >
+                          Activate
+                        </button>
+                      ) : auth.can('bas.pricing.manage') &&
+                        item.recordType !== 'OVERRIDE' &&
+                        item.status === 'RETIRED' ? (
+                        <button
+                          className="button secondary small"
+                          onClick={() => setVersionChange({ version: item, operation: 'rollback' })}
+                        >
+                          Roll back
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    />
+      {editing && business && (
+        <PricingRuleDialog
+          business={business}
+          close={() => setEditing(false)}
+          completed={async () => {
+            setEditing(false);
+            setError('');
+            await result.reload();
+          }}
+          failed={setError}
+        />
+      )}
+      {importing && (
+        <PricingImportDialog
+          close={() => setImporting(false)}
+          completed={async () => {
+            setImporting(false);
+            setError('');
+            await result.reload();
+          }}
+          failed={setError}
+        />
+      )}
+      {versionChange && (
+        <PricingVersionDialog
+          version={versionChange.version}
+          operation={versionChange.operation}
+          close={() => setVersionChange(undefined)}
+          completed={async () => {
+            setVersionChange(undefined);
+            setError('');
+            await result.reload();
+          }}
+          failed={setError}
+        />
+      )}
+    </Page>
+  );
+}
+
+function downloadBase64Workbook(exported: PricingWorkbookExport) {
+  const binary = window.atob(exported.fileBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const url = URL.createObjectURL(
+    new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+  );
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = exported.filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function fileBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the workbook'));
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '');
+    reader.readAsDataURL(file);
+  });
+}
+
+function PricingImportDialog({
+  close,
+  completed,
+  failed,
+}: {
+  close(): void;
+  completed(): Promise<void>;
+  failed(message: string): void;
+}) {
+  const [file, setFile] = useState<File>();
+  const [report, setReport] = useState<PricingWorkbookReport>();
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const preview = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      setReport(
+        await api.mutate<PricingWorkbookReport>(
+          'business-as-a-service',
+          'pricing-import-preview',
+          'Validate pricing workbook before import',
+          { fileBase64: await fileBase64(file) },
+        ),
+      );
+    } catch (cause) {
+      failed(cause instanceof Error ? cause.message : 'Workbook validation failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Import platform price book"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!file || !report?.valid) return;
+          setBusy(true);
+          void fileBase64(file)
+            .then((fileBase64Value) =>
+              api.mutate('business-as-a-service', 'pricing-import', reason, {
+                fileBase64: fileBase64Value,
+              }),
+            )
+            .then(completed)
+            .catch((cause) => failed(cause instanceof Error ? cause.message : 'Import failed'))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Platform pricing</p>
+            <h2>Import XLSX price book</h2>
+          </div>
+          <button type="button" className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        <label>
+          Workbook
+          <input
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            required
+            onChange={(event) => {
+              setFile(event.target.files?.[0]);
+              setReport(undefined);
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="button secondary"
+          disabled={!file || busy}
+          onClick={() => void preview()}
+        >
+          {busy ? 'Checking…' : 'Validate workbook'}
+        </button>
+        {report && (
+          <div className={report.valid ? 'state-card' : 'state-card state-card--error'}>
+            <strong>
+              {report.valid ? 'Workbook is ready for draft import' : 'Workbook cannot be imported'}
+            </strong>
+            <span>
+              {report.summary.stateCount} states · {report.summary.enabledRateCount} enabled rates ·{' '}
+              {report.summary.discountTierCount} tiers · {report.summary.ignoredDisabledRateCount}{' '}
+              disabled rates ignored
+              {report.summary.interstateRouteCount
+                ? ` · ${report.summary.interstateRouteCount} interstate routes · ${report.summary.interstateWeightBandCount} weight bands`
+                : ''}
+            </span>
+            {report.issues.slice(0, 20).map((issue, index) => (
+              <span key={`${issue.code}-${issue.row ?? index}`}>
+                {issue.severity}: {issue.sheet}
+                {issue.row ? ` row ${issue.row}` : ''} — {issue.message}
+              </span>
+            ))}
+            {report.issues.length > 20 && (
+              <span>{report.issues.length - 20} more issues omitted.</span>
+            )}
+          </div>
+        )}
+        <label>
+          Business reason
+          <textarea
+            minLength={8}
+            required
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <p className="risk-note">
+          Import creates an immutable draft. It does not affect quotes until separately activated.
+        </p>
+        <footer>
+          <button type="button" className="button secondary" onClick={close}>
+            Cancel
+          </button>
+          <button
+            className="button danger"
+            disabled={busy || !report?.valid || reason.trim().length < 8}
+          >
+            {busy ? 'Importing…' : 'Import draft'}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function PricingVersionDialog({
+  version,
+  operation,
+  close,
+  completed,
+  failed,
+}: {
+  version: PricingVersion;
+  operation: 'activate' | 'rollback';
+  close(): void;
+  completed(): Promise<void>;
+  failed(message: string): void;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${operation} pricing version`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          void api
+            .mutate('business-as-a-service', `pricing-version-${operation}`, reason, {
+              versionId: version.id,
+            })
+            .then(completed)
+            .catch((cause) =>
+              failed(cause instanceof Error ? cause.message : `Pricing ${operation} failed`),
+            )
+            .finally(() => setBusy(false));
+        }}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Platform pricing</p>
+            <h2>
+              {operation === 'activate' ? 'Activate' : 'Roll back to'} version {version.version}
+            </h2>
+          </div>
+          <button type="button" className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        <label>
+          Business reason
+          <textarea
+            minLength={8}
+            required
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <p className="risk-note">
+          This retires the currently active platform version. Existing quotes and orders retain
+          their original snapshots.
+        </p>
+        <footer>
+          <button type="button" className="button secondary" onClick={close}>
+            Cancel
+          </button>
+          <button className="button danger" disabled={busy || reason.trim().length < 8}>
+            {busy
+              ? 'Applying…'
+              : operation === 'activate'
+                ? 'Activate version'
+                : 'Confirm rollback'}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function PricingRuleDialog({
+  business,
+  close,
+  completed,
+  failed,
+}: {
+  business: Business;
+  close(): void;
+  completed(): Promise<void>;
+  failed(message: string): void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState('');
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add business pricing rule"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          setBusy(true);
+          void api
+            .mutate('business-as-a-service', 'pricing-override', reason, {
+              businessId: business.id,
+              state: String(data.get('state') || '') || undefined,
+              mobilityMethod: String(data.get('mobilityMethod') || '') || undefined,
+              perKmRate: data.get('perKmRate') ? Number(data.get('perKmRate')) : undefined,
+              minimumDeliveryPrice: data.get('minimumDeliveryPrice')
+                ? Number(data.get('minimumDeliveryPrice'))
+                : undefined,
+              cappedPrice: data.get('cappedPrice') ? Number(data.get('cappedPrice')) : undefined,
+            })
+            .then(completed)
+            .catch((cause) =>
+              failed(cause instanceof Error ? cause.message : 'Pricing update failed'),
+            )
+            .finally(() => setBusy(false));
+        }}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Business override</p>
+            <h2>{business.name}</h2>
+          </div>
+          <button type="button" className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        <label>
+          State (optional)
+          <input name="state" placeholder="Oyo" />
+        </label>
+        <label>
+          Mobility method (optional)
+          <select name="mobilityMethod">
+            <option value="">All methods</option>
+            <option value="bicycle">Bicycle</option>
+            <option value="motorcycle">Motorcycle</option>
+            <option value="tricycle">Tricycle</option>
+            <option value="car">Car</option>
+            <option value="van">Van</option>
+            <option value="truck">Truck</option>
+            <option value="large_truck">Large truck</option>
+          </select>
+        </label>
+        <label>
+          Per-kilometre rate
+          <input name="perKmRate" type="number" min="0" step="0.001" />
+        </label>
+        <label>
+          Minimum delivery price
+          <input name="minimumDeliveryPrice" type="number" min="0" step="0.01" required />
+        </label>
+        <label>
+          Capped price (optional)
+          <input name="cappedPrice" type="number" min="0" step="0.01" />
+        </label>
+        <label>
+          Business reason
+          <textarea
+            minLength={8}
+            required
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <p className="risk-note">
+          This creates a new active override; existing quotes and pricing history remain unchanged.
+        </p>
+        <footer>
+          <button type="button" className="button secondary" onClick={close}>
+            Cancel
+          </button>
+          <button className="button danger" disabled={busy || reason.trim().length < 8}>
+            {busy ? 'Saving…' : 'Create rule'}
+          </button>
+        </footer>
+      </form>
+    </div>
   );
 }
 
@@ -793,6 +1433,7 @@ export function InvoicesPage() {
 }
 
 export function IntegrationsPage() {
+  const auth = useAuth();
   const keys = useAsync(
     () => api.operation<ApiKeyRecord[]>('business-as-a-service', 'api-keys'),
     [],
@@ -801,7 +1442,17 @@ export function IntegrationsPage() {
     () => api.operation<WebhookDelivery[]>('business-as-a-service', 'webhooks'),
     [],
   );
+  const endpoints = useAsync(
+    () => api.operation<WebhookEndpoint[]>('business-as-a-service', 'webhook-endpoints'),
+    [],
+  );
   const [selected, setSelected] = useState<WebhookDelivery>();
+  const [credentialAction, setCredentialAction] = useState<{
+    operation: 'api-keys-revoke' | 'webhooks-disable';
+    id: string;
+    title: string;
+    description: string;
+  }>();
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const replay = async () => {
@@ -815,6 +1466,20 @@ export function IntegrationsPage() {
       await webhooks.reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Replay failed');
+    }
+  };
+  const applyCredentialAction = async () => {
+    if (!credentialAction) return;
+    try {
+      await api.mutate('business-as-a-service', credentialAction.operation, reason, {
+        [credentialAction.operation === 'api-keys-revoke' ? 'apiKeyId' : 'endpointId']:
+          credentialAction.id,
+      });
+      setCredentialAction(undefined);
+      setReason('');
+      await Promise.all([keys.reload(), endpoints.reload(), webhooks.reload()]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Credential action failed');
     }
   };
   return (
@@ -838,6 +1503,7 @@ export function IntegrationsPage() {
                 <th>Environment</th>
                 <th>Status</th>
                 <th>Last used</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -852,6 +1518,85 @@ export function IntegrationsPage() {
                     <StatusBadge value={item.status} />
                   </td>
                   <td>{item.lastUsedAt ? formatDate(item.lastUsedAt) : 'Never'}</td>
+                  <td>
+                    {item.status === 'ACTIVE' && auth.can('bas.api-keys.revoke') && (
+                      <button
+                        className="text-link danger-link"
+                        onClick={() => {
+                          setError('');
+                          setReason('');
+                          setCredentialAction({
+                            operation: 'api-keys-revoke',
+                            id: item.id,
+                            title: 'Revoke API key',
+                            description: `Immediately revoke ${item.publicKey} for ${item.business.name}.`,
+                          });
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <h2 className="section-title">Webhook endpoints</h2>
+      {endpoints.loading ? (
+        <LoadingState />
+      ) : endpoints.error ? (
+        <ErrorState error={endpoints.error} retry={endpoints.reload} />
+      ) : !endpoints.data?.length ? (
+        <EmptyState
+          title="No webhook endpoints"
+          description="No endpoints exist in the selected environment."
+        />
+      ) : (
+        <div className="table-panel">
+          <table aria-label="Webhook endpoints">
+            <thead>
+              <tr>
+                <th>Business</th>
+                <th>Endpoint</th>
+                <th>Environment</th>
+                <th>Status</th>
+                <th>Events</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {endpoints.data.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.business.name}</td>
+                  <td>
+                    <code>{new URL(item.url).host}</code>
+                  </td>
+                  <td>{item.environment}</td>
+                  <td>
+                    <StatusBadge value={item.enabled ? 'ACTIVE' : 'DISABLED'} />
+                  </td>
+                  <td>{Array.isArray(item.eventTypes) ? item.eventTypes.length : 0}</td>
+                  <td>
+                    {item.enabled && auth.can('bas.webhooks.manage') && (
+                      <button
+                        className="text-link danger-link"
+                        onClick={() => {
+                          setError('');
+                          setReason('');
+                          setCredentialAction({
+                            operation: 'webhooks-disable',
+                            id: item.id,
+                            title: 'Disable webhook endpoint',
+                            description: `Stop deliveries to ${new URL(item.url).host} for ${item.business.name}.`,
+                          });
+                        }}
+                      >
+                        Disable
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -871,6 +1616,7 @@ export function IntegrationsPage() {
                 <th>Business</th>
                 <th>Endpoint</th>
                 <th>Status</th>
+                <th>Environment</th>
                 <th>Attempts</th>
                 <th>Created</th>
                 <th />
@@ -886,14 +1632,18 @@ export function IntegrationsPage() {
                   <td>
                     <StatusBadge value={item.status} />
                   </td>
+                  <td>{item.endpoint.environment}</td>
                   <td>{item.attempts}</td>
                   <td>{formatDate(item.createdAt)}</td>
                   <td>
-                    {['COMPLETED', 'DEAD'].includes(item.status) && (
-                      <button className="text-link" onClick={() => setSelected(item)}>
-                        Replay
-                      </button>
-                    )}
+                    <div className="inline-actions">
+                      {['COMPLETED', 'DEAD'].includes(item.status) &&
+                        auth.can('bas.webhooks.replay') && (
+                          <button className="text-link" onClick={() => setSelected(item)}>
+                            Replay
+                          </button>
+                        )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -939,6 +1689,53 @@ export function IntegrationsPage() {
                 onClick={() => void replay()}
               >
                 Confirm replay
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+      {credentialAction && (
+        <div className="modal-backdrop">
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={credentialAction.title}
+          >
+            <header>
+              <div>
+                <p className="eyebrow">Credential lifecycle</p>
+                <h2>{credentialAction.title}</h2>
+              </div>
+              <button className="icon-control" onClick={() => setCredentialAction(undefined)}>
+                ×
+              </button>
+            </header>
+            {error && <div className="form-error">{error}</div>}
+            <p>{credentialAction.description}</p>
+            <label>
+              Business reason
+              <textarea
+                minLength={8}
+                required
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+            <p className="risk-note">
+              This action is scoped to the environment selected in the header and is written to both
+              audit trails.
+            </p>
+            <footer>
+              <button className="button secondary" onClick={() => setCredentialAction(undefined)}>
+                Cancel
+              </button>
+              <button
+                className="button danger"
+                disabled={reason.trim().length < 8}
+                onClick={() => void applyCredentialAction()}
+              >
+                Confirm
               </button>
             </footer>
           </div>

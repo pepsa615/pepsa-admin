@@ -46,6 +46,23 @@ textarea,
 select {
   font: inherit;
 }
+select {
+  min-height: 42px;
+  padding: 0 40px 0 13px;
+  border: 1px solid #d8dcd8;
+  border-radius: 9px;
+  color: var(--ink);
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='m5 7.5 5 5 5-5' stroke='%2368716b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  box-shadow: 0 1px 2px #1015120a;
+  appearance: none;
+  cursor: pointer;
+}
+select:hover {
+  border-color: #b9bfba;
+}
 button,
 a {
   transition: 0.18s ease;
@@ -221,7 +238,8 @@ a {
   gap: 12px;
 }
 .environment {
-  padding: 5px 9px;
+  min-height: 38px;
+  padding: 0 36px 0 12px;
   border: 1px solid #e8c3c5;
   border-radius: 5px;
   color: #7d1015;
@@ -232,11 +250,12 @@ a {
 .platform-switcher {
   width: calc(100% - 16px);
   margin: 0 8px 10px;
-  padding: 9px;
+  padding: 0 38px 0 12px;
   border: 1px solid #ffffff1f;
   border-radius: 7px;
   color: #eef1ef;
-  background: #1d231f;
+  background-color: #1d231f;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='m5 7.5 5 5 5-5' stroke='%23eef1ef' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .icon-control {
   display: grid;
@@ -256,9 +275,30 @@ a {
 }
 .filter-bar {
   display: grid;
-  grid-template-columns: 2fr 1fr 1.3fr 1.3fr auto;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
   margin-bottom: 16px;
+}
+.filter-bar label {
+  display: grid;
+  gap: 7px;
+  color: #414a45;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+.filter-summary {
+  align-self: end;
+  min-height: 42px;
+  padding: 12px 14px;
+  border: 1px solid #eed0d2;
+  border-radius: 9px;
+  color: #7d1015;
+  background: #fff7f7;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.danger-link {
+  color: #8c2026;
 }
 .filter-bar input,
 .filter-bar select {
@@ -267,6 +307,12 @@ a {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: white;
+}
+.filter-bar select {
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='m5 7.5 5 5 5-5' stroke='%2368716b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
 }
 .integrity-status {
   color: var(--muted);
