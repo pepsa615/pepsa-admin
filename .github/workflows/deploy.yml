@@ -1,16 +1,13 @@
 name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      environment:
-        description: Protected GitHub environment
-        required: true
-        type: choice
-        options: [staging, production]
       ref:
-        description: Git ref to deploy
-        required: true
+        description: Git ref to deploy (manual runs only)
+        required: false
         default: main
 
 permissions:
@@ -19,10 +16,10 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
-        with: { ref: '${{ inputs.ref }}' }
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with: { version: 11.18.0 }
       - uses: actions/setup-node@v4
