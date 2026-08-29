@@ -57,6 +57,9 @@ interface Business {
     filename?: string;
     mimeType: string;
     byteSize: number;
+    retentionExpiresAt?: string;
+    legalHoldAt?: string;
+    legalHoldReason?: string;
     createdAt: string;
   }>;
 }
@@ -77,6 +80,13 @@ interface Order {
   currency: string;
   createdAt: string;
   business: { name: string };
+  assets: Array<{
+    id: string;
+    filename?: string;
+    retentionExpiresAt?: string;
+    legalHoldAt?: string;
+    legalHoldReason?: string;
+  }>;
 }
 interface Wallet {
   id: string;
@@ -274,6 +284,15 @@ export function BusinessesPage() {
       setError(cause instanceof Error ? cause.message : 'Review failed');
     }
   };
+  const setLegalHold = async (assetId: string, action: 'PLACE' | 'RELEASE', reason: string) => {
+    try {
+      await api.mutate('business-as-a-service', 'asset-legal-hold', reason, { assetId, action });
+      setReview(undefined);
+      await result.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Legal hold operation failed');
+    }
+  };
   return (
     <Page
       eyebrow="Business as a Service"
@@ -387,6 +406,8 @@ export function BusinessesPage() {
           }}
           submit={submit}
           canReview={auth.can('bas.businesses.review')}
+          canManageLegalHold={auth.can('bas.assets.legal-hold')}
+          setLegalHold={setLegalHold}
         />
       )}
       {bulk && (
@@ -537,12 +558,16 @@ function ReviewDialog({
   close,
   submit,
   canReview,
+  canManageLegalHold,
+  setLegalHold,
 }: {
   business: Business;
   error: string;
   close(): void;
   submit(status: string, reason: string): Promise<void>;
   canReview: boolean;
+  canManageLegalHold: boolean;
+  setLegalHold(assetId: string, action: 'PLACE' | 'RELEASE', reason: string): Promise<void>;
 }) {
   const navigate = useNavigate();
   const transitions: Record<string, string[]> = {
@@ -559,6 +584,21 @@ function ReviewDialog({
   const [document, setDocument] = useState<BusinessDocument>();
   const [documentError, setDocumentError] = useState('');
   const [loadingDocumentId, setLoadingDocumentId] = useState('');
+  const [legalHoldAssetId, setLegalHoldAssetId] = useState('');
+  const changeLegalHold = async (asset: Business['storedAssets'][number]) => {
+    const action = asset.legalHoldAt ? 'RELEASE' : 'PLACE';
+    const reason = window.prompt(
+      `${action === 'PLACE' ? 'Reason for placing' : 'Reason for releasing'} the legal hold (minimum 8 characters)`,
+    );
+    if (!reason) return;
+    if (reason.trim().length < 8) {
+      setDocumentError('A legal-hold reason of at least 8 characters is required');
+      return;
+    }
+    setLegalHoldAssetId(asset.id);
+    setDocumentError('');
+    await setLegalHold(asset.id, action, reason.trim()).finally(() => setLegalHoldAssetId(''));
+  };
   const openDocument = async (assetId: string) => {
     setLoadingDocumentId(assetId);
     setDocumentError('');
@@ -665,15 +705,38 @@ function ReviewDialog({
                   <small>
                     {asset.filename ?? 'Uploaded document'} · {Math.ceil(asset.byteSize / 1024)} KB
                   </small>
+                  <small>
+                    {asset.legalHoldAt
+                      ? `Legal hold since ${formatDate(asset.legalHoldAt)}`
+                      : asset.retentionExpiresAt
+                        ? `Retained until ${formatDate(asset.retentionExpiresAt)}`
+                        : 'No automated expiry'}
+                  </small>
                 </div>
-                <button
-                  type="button"
-                  className="text-link"
-                  disabled={Boolean(loadingDocumentId)}
-                  onClick={() => void openDocument(asset.id)}
-                >
-                  {loadingDocumentId === asset.id ? 'Opening…' : 'View'}
-                </button>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="text-link"
+                    disabled={Boolean(loadingDocumentId)}
+                    onClick={() => void openDocument(asset.id)}
+                  >
+                    {loadingDocumentId === asset.id ? 'Opening…' : 'View'}
+                  </button>
+                  {canManageLegalHold && (
+                    <button
+                      type="button"
+                      className="text-link"
+                      disabled={Boolean(legalHoldAssetId)}
+                      onClick={() => void changeLegalHold(asset)}
+                    >
+                      {legalHoldAssetId === asset.id
+                        ? 'Applying…'
+                        : asset.legalHoldAt
+                          ? 'Release hold'
+                          : 'Place hold'}
+                    </button>
+                  )}
+                </div>
               </article>
             ))}
             {!business.storedAssets.length && <p>No uploaded documents were found.</p>}
@@ -754,29 +817,95 @@ function ReviewDialog({
 }
 
 export function OrdersPage() {
+  const auth = useAuth();
   const result = useAsync(() => api.operation<Order[]>('business-as-a-service', 'orders'), []);
+  const [holdError, setHoldError] = useState('');
+  const [busyAssetId, setBusyAssetId] = useState('');
+  const changeLegalHold = async (asset: Order['assets'][number]) => {
+    const action = asset.legalHoldAt ? 'RELEASE' : 'PLACE';
+    const reason = window.prompt(
+      `${action === 'PLACE' ? 'Reason for placing' : 'Reason for releasing'} the POD legal hold (minimum 8 characters)`,
+    );
+    if (!reason) return;
+    if (reason.trim().length < 8) {
+      setHoldError('A legal-hold reason of at least 8 characters is required');
+      return;
+    }
+    setBusyAssetId(asset.id);
+    setHoldError('');
+    try {
+      await api.mutate('business-as-a-service', 'asset-legal-hold', reason.trim(), {
+        assetId: asset.id,
+        action,
+      });
+      await result.reload();
+    } catch (cause) {
+      setHoldError(cause instanceof Error ? cause.message : 'Legal hold operation failed');
+    } finally {
+      setBusyAssetId('');
+    }
+  };
   return (
-    <DataPage
-      title="Orders"
-      description="Cross-tenant fulfillment activity and exceptions."
-      result={result}
-      headers={['Reference', 'Business', 'Status', 'Delivery', 'Amount', 'Created']}
-      row={(order) => (
-        <>
-          <td>
-            <strong>{order.clientReferenceId}</strong>
-            <small>{order.publicTrackingCode}</small>
-          </td>
-          <td>{order.business.name}</td>
-          <td>
-            <StatusBadge value={order.status} />
-          </td>
-          <td>{order.deliveryType}</td>
-          <td>{formatMoney(Number(order.quotedAmount), order.currency)}</td>
-          <td>{formatDate(order.createdAt)}</td>
-        </>
-      )}
-    />
+    <>
+      {holdError && <div className="form-error">{holdError}</div>}
+      <DataPage
+        title="Orders"
+        description="Cross-tenant fulfillment activity, proof-of-delivery retention, and exceptions."
+        result={result}
+        headers={[
+          'Reference',
+          'Business',
+          'Status',
+          'Delivery',
+          'Amount',
+          'POD evidence',
+          'Created',
+        ]}
+        row={(order) => (
+          <>
+            <td>
+              <strong>{order.clientReferenceId}</strong>
+              <small>{order.publicTrackingCode}</small>
+            </td>
+            <td>{order.business.name}</td>
+            <td>
+              <StatusBadge value={order.status} />
+            </td>
+            <td>{order.deliveryType}</td>
+            <td>{formatMoney(Number(order.quotedAmount), order.currency)}</td>
+            <td>
+              {!order.assets.length && <small>None</small>}
+              {order.assets.map((asset) => (
+                <div key={asset.id}>
+                  <small>
+                    {asset.legalHoldAt
+                      ? `Held since ${formatDate(asset.legalHoldAt)}`
+                      : asset.retentionExpiresAt
+                        ? `Until ${formatDate(asset.retentionExpiresAt)}`
+                        : 'No automated expiry'}
+                  </small>
+                  {auth.can('bas.assets.legal-hold') && (
+                    <button
+                      type="button"
+                      className="text-link"
+                      disabled={Boolean(busyAssetId)}
+                      onClick={() => void changeLegalHold(asset)}
+                    >
+                      {busyAssetId === asset.id
+                        ? 'Applying…'
+                        : asset.legalHoldAt
+                          ? 'Release hold'
+                          : 'Place hold'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </td>
+            <td>{formatDate(order.createdAt)}</td>
+          </>
+        )}
+      />
+    </>
   );
 }
 export function FinancePage() {
@@ -857,10 +986,7 @@ export function PricingPage() {
                 setExporting(true);
                 setError('');
                 void api
-                  .operation<PricingWorkbookExport>(
-                    'business-as-a-service',
-                    'pricing-export',
-                  )
+                  .operation<PricingWorkbookExport>('business-as-a-service', 'pricing-export')
                   .then((exported) => downloadBase64Workbook(exported))
                   .catch((cause) =>
                     setError(cause instanceof Error ? cause.message : 'Pricing export failed'),
