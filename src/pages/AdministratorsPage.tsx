@@ -15,6 +15,17 @@ export function AdministratorsPage() {
   const [error, setError] = useState('');
   const [developmentToken, setDevelopmentToken] = useState('');
   const [stepUp, setStepUp] = useState(false);
+  const resend = async (administrator: Administrator) => {
+    const reason = window.prompt('Business reason for resending this invitation:');
+    if (!reason) return;
+    setError('');
+    try {
+      const result = await api.resendInvitation(administrator.id, reason);
+      setDevelopmentToken(result.developmentToken ?? '');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not resend invitation');
+    }
+  };
   const invite = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
@@ -98,6 +109,11 @@ export function AdministratorsPage() {
                   <td>{admin.assignments.map(({ role }) => role.name).join(', ') || 'None'}</td>
                   <td>{formatDate(admin.lastLoginAt)}</td>
                   <td>
+                    {admin.status === 'INVITED' && auth.can('admin.users.manage') && (
+                      <button className="text-link" onClick={() => void resend(admin)}>
+                        Resend invite
+                      </button>
+                    )}
                     {auth.can('admin.access.manage') && (
                       <button className="text-link" onClick={() => setManaging(admin)}>
                         Manage

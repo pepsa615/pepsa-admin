@@ -334,6 +334,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
+  resendInvitation: (userId: string, reason: string) =>
+    request<{ accepted: boolean; developmentToken?: string }>(
+      `/administrators/${userId}/resend-invitation`,
+      { method: 'POST', body: JSON.stringify({ reason }) },
+    ),
   revokeAssignment: (assignmentId: string, reason: string) =>
     request(`/assignments/${assignmentId}/revoke`, {
       method: 'POST',
