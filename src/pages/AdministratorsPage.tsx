@@ -123,15 +123,17 @@ export function AdministratorsPage() {
                   <td>{admin.assignments.map(({ role }) => role.name).join(', ') || 'None'}</td>
                   <td>{formatDate(admin.lastLoginAt)}</td>
                   <td>
-                    {admin.status === 'INVITED' && auth.can('admin.users.manage') && (
-                      <button
-                        className="text-link"
-                        disabled={resendingId === admin.id}
-                        onClick={() => void resend(admin)}
-                      >
-                        {resendingId === admin.id ? 'Reinviting…' : 'Reinvite'}
-                      </button>
-                    )}
+                    {admin.mfaStatus !== 'ENABLED' &&
+                      !admin.lastLoginAt &&
+                      auth.can('admin.users.manage') && (
+                        <button
+                          className="text-link"
+                          disabled={resendingId === admin.id}
+                          onClick={() => void resend(admin)}
+                        >
+                          {resendingId === admin.id ? 'Reinviting…' : 'Reinvite'}
+                        </button>
+                      )}
                     {auth.can('admin.access.manage') && (
                       <button className="text-link" onClick={() => setManaging(admin)}>
                         Manage
