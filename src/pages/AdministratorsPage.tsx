@@ -199,6 +199,16 @@ export function AdministratorsPage() {
   );
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
+}
+
 function ManageAccessDialog({
   administrator,
   close,
@@ -208,7 +218,9 @@ function ManageAccessDialog({
   close(): void;
   completed(): Promise<void>;
 }) {
+  const auth = useAuth();
   const platforms = useAsync(api.platforms, []);
+  const approvals = useAsync(api.approvals, []);
   const [platformId, setPlatformId] = useState('');
   const roles = useAsync(() => api.roles(platformId || undefined), [platformId]);
   const [roleId, setRoleId] = useState('');
@@ -216,13 +228,58 @@ function ManageAccessDialog({
   const [expiresAt, setExpiresAt] = useState('');
   const [membershipExpiresAt, setMembershipExpiresAt] = useState('');
   const [resourceScope, setResourceScope] = useState('');
-  const [approvalId, setApprovalId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [approvalNotice, setApprovalNotice] = useState('');
   const selectedRole = roles.data?.find(({ id }) => id === roleId);
   const selectedRoleIsCritical = selectedRole?.permissions.some(
     ({ permission }) => permission.riskLevel === 'CRITICAL',
   );
+  let assignmentPayload: Record<string, unknown> | undefined;
+  try {
+    assignmentPayload = {
+      userId: administrator.id,
+      roleId,
+      platformId: platformId || null,
+      environmentId: environmentId || null,
+      resourceScope: resourceScope ? (JSON.parse(resourceScope) as Record<string, unknown>) : null,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+    };
+  } catch {
+    assignmentPayload = undefined;
+  }
+  const matchingApproval = approvals.data?.find(
+    (approval) =>
+      approval.action === 'role.assign' &&
+      approval.status === 'APPROVED' &&
+      approval.requester.id === auth.session?.user.id &&
+      (approval.platform?.id ?? null) === (platformId || null) &&
+      new Date(approval.expiresAt) > new Date() &&
+      assignmentPayload !== undefined &&
+      canonicalJson(approval.payload) === canonicalJson(assignmentPayload),
+  );
+  const requestAssignmentApproval = async () => {
+    if (reason.trim().length < 8)
+      return setError('Enter a business reason of at least 8 characters.');
+    if (!assignmentPayload) return setError('Resource scope must contain valid JSON.');
+    setError('');
+    setApprovalNotice('');
+    try {
+      await api.requestApproval({
+        platformId: platformId || undefined,
+        action: 'role.assign',
+        riskLevel: 'CRITICAL',
+        reason,
+        payload: assignmentPayload,
+        approvalsRequired: 1,
+        expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      });
+      setApprovalNotice('Approval requested. Another administrator must approve it.');
+      await approvals.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not request approval');
+    }
+  };
   const act = async (operation: () => Promise<unknown>) => {
     if (reason.trim().length < 8)
       return setError('Enter a business reason of at least 8 characters.');
@@ -371,15 +428,6 @@ function ManageAccessDialog({
               placeholder={'{"businessId":"…"}'}
             />
           </label>
-          <label>
-            Approval ID{' '}
-            <small>
-              {selectedRoleIsCritical
-                ? 'Required: use the UUID of an approved role.assign request.'
-                : 'Only required for a critical role.'}
-            </small>
-            <input value={approvalId} onChange={(event) => setApprovalId(event.target.value)} />
-          </label>
           <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
             <option value="">Select role</option>
             {roles.data?.map((role) => (
@@ -388,22 +436,42 @@ function ManageAccessDialog({
               </option>
             ))}
           </select>
+          {selectedRoleIsCritical && (
+            <div className="state-card" role="status">
+              {matchingApproval ? (
+                <>
+                  <strong>Approved request matched automatically</strong>
+                  <span>{matchingApproval.reason}</span>
+                </>
+              ) : (
+                <>
+                  <strong>Independent approval required</strong>
+                  <span>
+                    Request approval for this exact assignment, then have another administrator
+                    approve it. It will be matched here automatically.
+                  </span>
+                  {approvalNotice && <span>{approvalNotice}</span>}
+                  {auth.can('admin.approvals.request') && (
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => void requestAssignmentApproval()}
+                    >
+                      Request approval
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <button
             className="button primary"
             disabled={!roleId}
             onClick={() => {
-              const normalizedApprovalId = approvalId.trim();
-              if (selectedRoleIsCritical && !normalizedApprovalId) {
-                setError('Select or enter an approved role assignment ID for this critical role.');
-                return;
-              }
-              if (
-                normalizedApprovalId &&
-                !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-                  normalizedApprovalId,
-                )
-              ) {
-                setError('Approval ID must be a valid UUID from the Approvals page.');
+              if (selectedRoleIsCritical && !matchingApproval) {
+                setError(
+                  'This critical role assignment does not have a matching approved request.',
+                );
                 return;
               }
               void act(() =>
@@ -415,7 +483,7 @@ function ManageAccessDialog({
                     ? (JSON.parse(resourceScope) as Record<string, unknown>)
                     : undefined,
                   expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
-                  approvalId: normalizedApprovalId || undefined,
+                  approvalId: matchingApproval?.id,
                   reason,
                 }),
               );
