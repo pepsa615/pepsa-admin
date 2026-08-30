@@ -13,17 +13,24 @@ export function AdministratorsPage() {
   const [inviting, setInviting] = useState(false);
   const [managing, setManaging] = useState<Administrator>();
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [developmentToken, setDevelopmentToken] = useState('');
+  const [resendingId, setResendingId] = useState('');
   const [stepUp, setStepUp] = useState(false);
   const resend = async (administrator: Administrator) => {
     const reason = window.prompt('Business reason for resending this invitation:');
     if (!reason) return;
     setError('');
+    setNotice('');
+    setResendingId(administrator.id);
     try {
       const result = await api.resendInvitation(administrator.id, reason);
       setDevelopmentToken(result.developmentToken ?? '');
+      setNotice(`A new invitation was sent to ${administrator.email}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not resend invitation');
+    } finally {
+      setResendingId('');
     }
   };
   const invite = async (event: FormEvent<HTMLFormElement>) => {
@@ -70,6 +77,13 @@ export function AdministratorsPage() {
           <span>Production sends this token through the configured verified delivery service.</span>
         </div>
       )}
+      {notice && (
+        <div className="state-card" role="status">
+          <strong>Invitation sent</strong>
+          <span>{notice}</span>
+        </div>
+      )}
+      {error && !inviting && <div className="form-error">{error}</div>}
       {administrators.loading ? (
         <LoadingState />
       ) : administrators.error ? (
@@ -110,8 +124,12 @@ export function AdministratorsPage() {
                   <td>{formatDate(admin.lastLoginAt)}</td>
                   <td>
                     {admin.status === 'INVITED' && auth.can('admin.users.manage') && (
-                      <button className="text-link" onClick={() => void resend(admin)}>
-                        Resend invite
+                      <button
+                        className="text-link"
+                        disabled={resendingId === admin.id}
+                        onClick={() => void resend(admin)}
+                      >
+                        {resendingId === admin.id ? 'Reinviting…' : 'Reinvite'}
                       </button>
                     )}
                     {auth.can('admin.access.manage') && (
@@ -191,7 +209,7 @@ function ManageAccessDialog({
   completed(): Promise<void>;
 }) {
   const platforms = useAsync(api.platforms, []);
-  const [platformId, setPlatformId] = useState(administrator.memberships[0]?.platform.id ?? '');
+  const [platformId, setPlatformId] = useState('');
   const roles = useAsync(() => api.roles(platformId || undefined), [platformId]);
   const [roleId, setRoleId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
@@ -201,6 +219,10 @@ function ManageAccessDialog({
   const [approvalId, setApprovalId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const selectedRole = roles.data?.find(({ id }) => id === roleId);
+  const selectedRoleIsCritical = selectedRole?.permissions.some(
+    ({ permission }) => permission.riskLevel === 'CRITICAL',
+  );
   const act = async (operation: () => Promise<unknown>) => {
     if (reason.trim().length < 8)
       return setError('Enter a business reason of at least 8 characters.');
@@ -260,7 +282,10 @@ function ManageAccessDialog({
           </div>
         </section>
         <section className="access-section">
-          <strong>Platform membership and role</strong>
+          <strong>Role scope, platform membership and role</strong>
+          <small>
+            Super admin is a global role. Choose a platform only for platform-scoped roles.
+          </small>
           <select
             value={platformId}
             onChange={(event) => {
@@ -269,7 +294,7 @@ function ManageAccessDialog({
               setEnvironmentId('');
             }}
           >
-            <option value="">Select platform</option>
+            <option value="">Global (Super admin and control-plane roles)</option>
             {platforms.data?.map((platform) => (
               <option key={platform.id} value={platform.id}>
                 {platform.name}
@@ -347,7 +372,12 @@ function ManageAccessDialog({
             />
           </label>
           <label>
-            Approval reference <small>Required for a critical role.</small>
+            Approval ID{' '}
+            <small>
+              {selectedRoleIsCritical
+                ? 'Required: use the UUID of an approved role.assign request.'
+                : 'Only required for a critical role.'}
+            </small>
             <input value={approvalId} onChange={(event) => setApprovalId(event.target.value)} />
           </label>
           <select value={roleId} onChange={(event) => setRoleId(event.target.value)}>
@@ -361,7 +391,21 @@ function ManageAccessDialog({
           <button
             className="button primary"
             disabled={!roleId}
-            onClick={() =>
+            onClick={() => {
+              const normalizedApprovalId = approvalId.trim();
+              if (selectedRoleIsCritical && !normalizedApprovalId) {
+                setError('Select or enter an approved role assignment ID for this critical role.');
+                return;
+              }
+              if (
+                normalizedApprovalId &&
+                !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                  normalizedApprovalId,
+                )
+              ) {
+                setError('Approval ID must be a valid UUID from the Approvals page.');
+                return;
+              }
               void act(() =>
                 api.assignRole(administrator.id, {
                   roleId,
@@ -371,11 +415,11 @@ function ManageAccessDialog({
                     ? (JSON.parse(resourceScope) as Record<string, unknown>)
                     : undefined,
                   expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
-                  approvalId: approvalId || undefined,
+                  approvalId: normalizedApprovalId || undefined,
                   reason,
                 }),
-              )
-            }
+              );
+            }}
           >
             Assign role
           </button>
