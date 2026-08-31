@@ -147,6 +147,7 @@ interface Transaction {
   referenceId?: string;
   correlationId?: string;
   createdAt: string;
+  environment: string;
   business: { name: string };
 }
 interface Invoice {
@@ -160,6 +161,7 @@ interface Invoice {
   status: string;
   billingCycle: string;
   createdAt: string;
+  environment: string;
   business: { name: string };
 }
 interface ApiKeyRecord {
@@ -1517,10 +1519,11 @@ export function TransactionsPage() {
       title="Transactions"
       description="Read-only financial movement history with destination correlation references."
       result={result}
-      headers={['Business', 'Type', 'Category', 'Status', 'Amount', 'Created']}
+      headers={['Business', 'Environment', 'Type', 'Category', 'Status', 'Amount', 'Created']}
       row={(item) => (
         <>
           <td>{item.business.name}</td>
+          <td><StatusBadge value={item.environment} /></td>
           <td>{item.type}</td>
           <td>{item.category}</td>
           <td>
@@ -1541,10 +1544,11 @@ export function InvoicesPage() {
       title="Invoices"
       description="Billing exposure and due-date status across BAS tenants."
       result={result}
-      headers={['Business', 'Cycle', 'Status', 'Subtotal', 'Paid', 'Due']}
+      headers={['Business', 'Environment', 'Cycle', 'Status', 'Subtotal', 'Paid', 'Due']}
       row={(item) => (
         <>
           <td>{item.business.name}</td>
+          <td><StatusBadge value={item.environment} /></td>
           <td>{item.billingCycle}</td>
           <td>
             <StatusBadge value={item.status} />
