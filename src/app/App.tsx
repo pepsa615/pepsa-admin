@@ -15,6 +15,24 @@ import {
   PricingPage,
   TransactionsPage,
 } from '../pages/BasPages.js';
+import {
+  OrderDispatchPage,
+  OrderEventsPage,
+  OrderFleetPage,
+  OrderIntegrationsPage,
+  OrderOverviewPage,
+  OrderPartnersPage,
+  OrderPoliciesPage,
+  OrderProcessingPage,
+} from '../pages/OrderPages.js';
+import {
+  PaymentCheckoutPage,
+  PaymentKycPage,
+  PaymentOverviewPage,
+  PaymentPlatformsPage,
+  PaymentSettingsPage,
+  PaymentSvaPage,
+} from '../pages/PaymentPages.js';
 import { LoginPage } from '../pages/LoginPage.js';
 import { OperationsPage } from '../pages/OperationsPage.js';
 import { OverviewPage } from '../pages/OverviewPage.js';
@@ -183,6 +201,118 @@ export function App() {
             element={
               <PermissionRoute permission="bas.audit.read">
                 <PlatformAuditPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/overview"
+            element={
+              <PermissionRoute permission="order.fleet.read">
+                <OrderOverviewPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/partners"
+            element={
+              <PermissionRoute permission="order.partners.read">
+                <OrderPartnersPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/fleet"
+            element={
+              <PermissionRoute permission="order.fleet.read">
+                <OrderFleetPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/processing"
+            element={
+              <PermissionRoute permission="order.processing.read">
+                <OrderProcessingPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/dispatch"
+            element={
+              <PermissionRoute permission="order.dispatch.read">
+                <OrderDispatchPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/policies"
+            element={
+              <PermissionRoute permission="order.operations.policies.read">
+                <OrderPoliciesPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/events"
+            element={
+              <PermissionRoute permission="order.events.read">
+                <OrderEventsPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-order/integrations"
+            element={
+              <PermissionRoute permission="order.integrations.read">
+                <OrderIntegrationsPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/overview"
+            element={
+              <PermissionRoute permission="payment.sva.provisioning.read">
+                <PaymentOverviewPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/platforms"
+            element={
+              <PermissionRoute permission="payment.platforms.write">
+                <PaymentPlatformsPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/settings"
+            element={
+              <PermissionRoute permission="payment.settings.transfer">
+                <PaymentSettingsPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/sva"
+            element={
+              <PermissionRoute permission="payment.sva.provisioning.read">
+                <PaymentSvaPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/checkout"
+            element={
+              <PermissionRoute permission="payment.checkout.provisioning.read">
+                <PaymentCheckoutPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/pepsa-payment/kyc"
+            element={
+              <PermissionRoute permission="payment.kyc.encryption.rotate">
+                <PaymentKycPage />
               </PermissionRoute>
             }
           />

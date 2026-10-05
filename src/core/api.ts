@@ -138,12 +138,8 @@ export interface AdminSession {
 }
 
 let csrfToken = '';
-let platformEnvironment = 'production';
 export const setCsrfToken = (value: string) => {
   csrfToken = value;
-};
-export const setPlatformEnvironment = (value: string) => {
-  platformEnvironment = value;
 };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -154,7 +150,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       accept: 'application/json',
       ...(init.body ? { 'content-type': 'application/json' } : {}),
       ...(csrfToken && init.method && init.method !== 'GET' ? { 'x-csrf-token': csrfToken } : {}),
-      ...(path.startsWith('/operations/') ? { 'x-platform-environment': platformEnvironment } : {}),
       ...init.headers,
     },
   });

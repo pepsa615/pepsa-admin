@@ -16,12 +16,6 @@ const platform = {
       name: 'Production',
       status: 'ACTIVE',
     },
-    {
-      id: '33333333-3333-4333-8333-333333333333',
-      key: 'sandbox',
-      name: 'Sandbox',
-      status: 'ACTIVE',
-    },
   ],
 };
 
@@ -97,8 +91,8 @@ test('login, MFA, platform switching, environment scope, and denial', async ({ p
   ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Businesses' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Orders' })).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Platform environment' }).selectOption('sandbox');
-  await expect(page.getByRole('combobox', { name: 'Platform environment' })).toHaveValue('sandbox');
+  await expect(page.getByRole('combobox', { name: 'Platform environment' })).toHaveCount(0);
+  await expect(page.getByText('Business as a Service')).toBeVisible();
   await page.goto('/audit');
   await expect(page.getByRole('alert')).toContainText('Permission denied');
 });

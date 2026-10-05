@@ -226,7 +226,6 @@ function ManageAccessDialog({
   const [platformId, setPlatformId] = useState('');
   const roles = useAsync(() => api.roles(platformId || undefined), [platformId]);
   const [roleId, setRoleId] = useState('');
-  const [environmentId, setEnvironmentId] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [membershipExpiresAt, setMembershipExpiresAt] = useState('');
   const [resourceScope, setResourceScope] = useState('');
@@ -243,7 +242,7 @@ function ManageAccessDialog({
       userId: administrator.id,
       roleId,
       platformId: platformId || null,
-      environmentId: environmentId || null,
+      environmentId: null,
       resourceScope: resourceScope ? (JSON.parse(resourceScope) as Record<string, unknown>) : null,
       expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
     };
@@ -350,7 +349,6 @@ function ManageAccessDialog({
             onChange={(event) => {
               setPlatformId(event.target.value);
               setRoleId('');
-              setEnvironmentId('');
             }}
           >
             <option value="">Global (Super admin and control-plane roles)</option>
@@ -404,24 +402,6 @@ function ManageAccessDialog({
               onChange={(event) => setExpiresAt(event.target.value)}
             />
           </label>
-          {platformId && (
-            <label>
-              Environment scope
-              <select
-                value={environmentId}
-                onChange={(event) => setEnvironmentId(event.target.value)}
-              >
-                <option value="">All assigned environments</option>
-                {platforms.data
-                  ?.find(({ id }) => id === platformId)
-                  ?.environments.map((environment) => (
-                    <option key={environment.id} value={environment.id}>
-                      {environment.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          )}
           <label>
             Resource scope (JSON) <small>Optional destination-owned constraint.</small>
             <textarea
@@ -480,7 +460,7 @@ function ManageAccessDialog({
                 api.assignRole(administrator.id, {
                   roleId,
                   platformId: platformId || undefined,
-                  environmentId: environmentId || undefined,
+                  environmentId: undefined,
                   resourceScope: resourceScope
                     ? (JSON.parse(resourceScope) as Record<string, unknown>)
                     : undefined,

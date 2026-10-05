@@ -1,9 +1,8 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../app/AuthContext.js';
 import { NotificationsMenu } from './NotificationsMenu.js';
-import { api, setPlatformEnvironment } from '../core/api.js';
+import { api } from '../core/api.js';
 import { useAsync } from '../core/useAsync.js';
-import { useEffect, useState } from 'react';
 
 const globalNavigation = [
   ['/overview', 'Overview', '⌂', ''],
@@ -32,6 +31,54 @@ const platformNavigation = [
   ['/p/business-as-a-service/integrations', 'API & webhooks', 'bas.webhooks.read', 'webhooks'],
   ['/p/business-as-a-service/audit', 'Platform audit', 'bas.audit.read', 'audit'],
 ] as const;
+const orderNavigation = [
+  ['/p/pepsa-order/overview', 'Order overview', 'order.fleet.read', 'fleet-health'],
+  ['/p/pepsa-order/partners', 'Partners', 'order.partners.read', 'catalog-read'],
+  ['/p/pepsa-order/fleet', 'Fleet', 'order.fleet.read', 'fleet-riders'],
+  ['/p/pepsa-order/processing', 'Processing', 'order.processing.read', 'processing-pool'],
+  ['/p/pepsa-order/dispatch', 'Dispatch', 'order.dispatch.read', 'dispatch-tasks'],
+  [
+    '/p/pepsa-order/policies',
+    'Policies',
+    'order.operations.policies.read',
+    'policies-active',
+  ],
+  ['/p/pepsa-order/events', 'Events', 'order.events.read', 'events-list'],
+  ['/p/pepsa-order/integrations', 'Integrations', 'order.integrations.read', 'integrations-list'],
+] as const;
+const paymentNavigation = [
+  [
+    '/p/pepsa-payment/overview',
+    'Payment overview',
+    'payment.sva.provisioning.read',
+    'sva-provisioning-list',
+  ],
+  ['/p/pepsa-payment/platforms', 'Payment platforms', 'payment.platforms.write', 'platforms-onboard'],
+  [
+    '/p/pepsa-payment/settings',
+    'Settings',
+    'payment.settings.transfer',
+    'transfer-settings-get',
+  ],
+  [
+    '/p/pepsa-payment/sva',
+    'SVA provisioning',
+    'payment.sva.provisioning.read',
+    'sva-provisioning-list',
+  ],
+  [
+    '/p/pepsa-payment/checkout',
+    'Checkout / DVA',
+    'payment.checkout.provisioning.read',
+    'checkout-provisioning-list',
+  ],
+  [
+    '/p/pepsa-payment/kyc',
+    'KYC encryption',
+    'payment.kyc.encryption.rotate',
+    'kyc-rotate-encryption',
+  ],
+] as const;
 
 export function AppShell() {
   const auth = useAuth();
@@ -48,16 +95,6 @@ export function AppShell() {
     [selectedPlatform?.key],
   );
   const supportedOperations = new Set(capabilities.data?.operations.map(({ key }) => key) ?? []);
-  const [environment, setEnvironment] = useState('production');
-  useEffect(() => {
-    if (selectedPlatform && !selectedPlatform.environments.some(({ key }) => key === environment)) {
-      const fallback = selectedPlatform.environments[0]?.key;
-      if (fallback) {
-        setEnvironment(fallback);
-        setPlatformEnvironment(fallback);
-      }
-    }
-  }, [selectedPlatform, environment]);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -105,6 +142,28 @@ export function AppShell() {
                   {label}
                 </NavLink>
               ))}
+          {selectedPlatform?.key === 'pepsa-order' &&
+            orderNavigation
+              .filter(
+                ([, , permission, operation]) =>
+                  auth.can(permission) && supportedOperations.has(operation),
+              )
+              .map(([to, label]) => (
+                <NavLink key={to} to={to}>
+                  {label}
+                </NavLink>
+              ))}
+          {selectedPlatform?.key === 'pepsa-payment' &&
+            paymentNavigation
+              .filter(
+                ([, , permission, operation]) =>
+                  auth.can(permission) && supportedOperations.has(operation),
+              )
+              .map(([to, label]) => (
+                <NavLink key={to} to={to}>
+                  {label}
+                </NavLink>
+              ))}
         </nav>
         <div className="sidebar-user">
           <span className="avatar">{auth.session?.user.name.slice(0, 2).toUpperCase()}</span>
@@ -131,29 +190,13 @@ export function AppShell() {
             </strong>
           </div>
           <div className="topbar-actions">
-            {selectedPlatform ? (
-              <select
-                className="environment"
-                value={environment}
-                onChange={(event) => {
-                  setEnvironment(event.target.value);
-                  setPlatformEnvironment(event.target.value);
-                }}
-                aria-label="Platform environment"
-              >
-                {selectedPlatform.environments.map((item) => (
-                  <option key={item.id} value={item.key}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="environment">Control plane</span>
-            )}
+            <span className="environment" title="Staging vs production isolation is by deploy host, not an in-app switch">
+              {selectedPlatform ? selectedPlatform.name : 'Control plane'}
+            </span>
             <NotificationsMenu />
           </div>
         </header>
-        <Outlet key={`${selectedPlatform?.key ?? 'global'}:${environment}`} />
+        <Outlet key={selectedPlatform?.key ?? 'global'} />
       </main>
     </div>
   );

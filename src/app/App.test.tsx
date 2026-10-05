@@ -236,8 +236,6 @@ describe('admin authentication boundary', () => {
       await screen.findByRole('link', { name: 'Businesses' }, { timeout: 15_000 }),
     ).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Orders' })).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Platform environment' })).toHaveValue(
-      'production',
-    );
+    expect(screen.queryByRole('combobox', { name: 'Platform environment' })).not.toBeInTheDocument();
   });
 });

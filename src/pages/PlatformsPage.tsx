@@ -13,7 +13,6 @@ export function PlatformsPage() {
   const platforms = useAsync(api.platforms, []);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Platform>();
-  const [environmentFor, setEnvironmentFor] = useState<Platform>();
   const [rotating, setRotating] = useState<Platform>();
   const [stepUp, setStepUp] = useState(false);
   if (platforms.loading) return <LoadingState label="Loading platforms" />;
@@ -22,7 +21,7 @@ export function PlatformsPage() {
     <Page
       eyebrow="Registry"
       title="Connected platforms"
-      description="Independent Pepsa products connected through versioned, signed integration contracts."
+      description="Independent Pepsa products connected through versioned, signed integration contracts. Staging vs production isolation is by deploy host."
       action={
         auth.can('admin.platforms.manage') ? (
           <div className="inline-actions">
@@ -43,7 +42,6 @@ export function PlatformsPage() {
             platform={platform}
             manage={auth.can('admin.platforms.manage')}
             edit={() => setEditing(platform)}
-            addEnvironment={() => setEnvironmentFor(platform)}
             rotateCredentials={() => setRotating(platform)}
           />
         ))}
@@ -53,13 +51,6 @@ export function PlatformsPage() {
         <EditPlatform
           platform={editing}
           close={() => setEditing(undefined)}
-          completed={platforms.reload}
-        />
-      )}
-      {environmentFor && (
-        <AddEnvironment
-          platform={environmentFor}
-          close={() => setEnvironmentFor(undefined)}
           completed={platforms.reload}
         />
       )}
@@ -79,13 +70,11 @@ function PlatformCard({
   platform,
   manage,
   edit,
-  addEnvironment,
   rotateCredentials,
 }: {
   platform: Platform;
   manage: boolean;
   edit(): void;
-  addEnvironment(): void;
   rotateCredentials(): void;
 }) {
   const health = useAsync(() => api.platformHealth(platform.key), [platform.key]);
@@ -107,21 +96,20 @@ function PlatformCard({
           <dd>Versioned HTTP · v1</dd>
         </div>
         <div>
-          <dt>Environments</dt>
-          <dd>{platform.environments.map(({ name }) => name).join(', ') || 'None'}</dd>
+          <dt>Deploy environment</dt>
+          <dd>
+            {platform.environments.map(({ name }) => name).join(', ') || 'production'} (host-scoped)
+          </dd>
         </div>
         <div>
           <dt>Isolation</dt>
-          <dd>Independent deployment</dd>
+          <dd>Staging vs production by separate admin deploy</dd>
         </div>
       </dl>
       {manage && (
         <footer className="inline-actions">
           <button className="button secondary" onClick={edit}>
             Edit
-          </button>
-          <button className="button secondary" onClick={addEnvironment}>
-            Add environment
           </button>
           <button className="button secondary" onClick={rotateCredentials}>
             Rotate credentials
@@ -332,64 +320,6 @@ function RotateCredentials({
       </label>
       <footer>
         <button className="button primary">Rotate reference</button>
-      </footer>
-    </ModalForm>
-  );
-}
-
-function AddEnvironment({
-  platform,
-  close,
-  completed,
-}: {
-  platform: Platform;
-  close(): void;
-  completed(): Promise<void>;
-}) {
-  const [error, setError] = useState('');
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setError('');
-    try {
-      await api.addPlatformEnvironment(platform.id, {
-        key: String(form.get('key')),
-        name: String(form.get('name')),
-        endpointReference: String(form.get('endpointReference') || '') || undefined,
-        reason: String(form.get('reason')),
-      });
-      close();
-      await completed();
-    } catch (cause) {
-      setError(message(cause));
-    }
-  };
-  return (
-    <ModalForm
-      title={`Add ${platform.name} environment`}
-      eyebrow="Environment isolation"
-      close={close}
-      submit={submit}
-    >
-      {error && <div className="form-error">{error}</div>}
-      <label>
-        Environment key
-        <input name="key" pattern="[a-z0-9-]+" placeholder="production" required />
-      </label>
-      <label>
-        Name
-        <input name="name" placeholder="Production" required />
-      </label>
-      <label>
-        Endpoint secret reference
-        <input name="endpointReference" placeholder="vault://admin/platforms/bas/production" />
-      </label>
-      <label>
-        Business reason
-        <textarea name="reason" minLength={8} required />
-      </label>
-      <footer>
-        <button className="button primary">Add environment</button>
       </footer>
     </ModalForm>
   );

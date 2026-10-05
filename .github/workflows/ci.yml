@@ -1,5 +1,14 @@
 name: Admin frontend CI
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -15,6 +24,7 @@ jobs:
         env:
           ADMIN_API_CONTRACT_SOURCE: contracts/releases/admin-api-v1.2.0.yaml
       - run: pnpm test
+      # Full e2e suite includes admin-workflows, order-workflows, and payment-workflows.
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - run: pnpm lint
