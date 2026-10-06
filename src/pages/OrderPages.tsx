@@ -4,6 +4,7 @@ import {
   ChipList,
   DetailPanel,
   ReasonModal,
+  asFailureGroups,
   asRecords,
   formatMaybeDate,
   pickString,
@@ -1637,7 +1638,27 @@ export function OrderEventsPage() {
       ) : failures.error ? (
         <ErrorState error={failures.error} retry={failures.reload} />
       ) : (
-        <EventTable rows={asRecords(failures.data)} label="Provider failures" />
+        (() => {
+          const groups = asFailureGroups(failures.data);
+          if (!groups.length) {
+            return (
+              <EmptyState
+                title="No provider failures"
+                description="Outbox, webhook, and notification failure queues are empty."
+              />
+            );
+          }
+          return (
+            <>
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <h3 className="section-title">{group.label}</h3>
+                  <EventTable rows={group.rows} label={group.label} />
+                </div>
+              ))}
+            </>
+          );
+        })()
       )}
       <h2 className="section-title">Events</h2>
       {!partnerId.trim() ? (

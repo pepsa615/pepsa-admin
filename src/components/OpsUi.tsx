@@ -17,11 +17,36 @@ export function asRecords(value: unknown): JsonRecord[] {
       'tasks',
       'integrations',
       'events',
+      'platforms',
+      'partners',
     ]) {
       if (Array.isArray(record[key])) return record[key] as JsonRecord[];
     }
   }
   return [];
+}
+
+/** Flatten provider-failures shape `{ outbox, webhooks, notifications }`. */
+export function asFailureGroups(value: unknown): Array<{ label: string; rows: JsonRecord[] }> {
+  if (!value || typeof value !== 'object') return [];
+  const record = value as JsonRecord;
+  const groups: Array<{ label: string; rows: JsonRecord[] }> = [];
+  for (const [label, key] of [
+    ['Outbox', 'outbox'],
+    ['Webhooks', 'webhooks'],
+    ['Notifications', 'notifications'],
+  ] as const) {
+    if (Array.isArray(record[key])) {
+      groups.push({ label, rows: record[key] as JsonRecord[] });
+    }
+  }
+  if (groups.length) {
+    return groups.some((group) => group.rows.length > 0)
+      ? groups.filter((group) => group.rows.length > 0)
+      : [];
+  }
+  const flat = asRecords(value);
+  return flat.length ? [{ label: 'Failures', rows: flat }] : [];
 }
 
 export function scalar(value: unknown) {
