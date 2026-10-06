@@ -266,7 +266,10 @@ test('pepsa-payment overview read and rotate-key mutation with step-up', async (
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
   await page.getByRole('button', { name: 'Rotate key' }).click();
   await page.getByLabel('Business reason').fill('Scheduled quarterly platform API key rotation');
-  await page.getByRole('button', { name: 'Rotate key', exact: true }).click();
+  await page
+    .getByLabel('Rotate platform API key')
+    .getByRole('button', { name: 'Rotate key' })
+    .click();
 
   await expect
     .poll(() => rotateBody)

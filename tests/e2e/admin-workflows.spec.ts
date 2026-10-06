@@ -150,7 +150,9 @@ test('invitation verifies identity by delivery token without an operator passwor
   await page.getByLabel('Work email').fill('tunde@example.com');
   await page.getByLabel('Business reason').fill('Approved operations team onboarding');
   await page.getByRole('button', { name: 'Send invitation' }).click();
-  await expect(page.getByRole('status')).toContainText('Development invitation token');
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Development invitation token' }),
+  ).toBeVisible();
   await expect
     .poll(() => invitationBody)
     .toEqual({

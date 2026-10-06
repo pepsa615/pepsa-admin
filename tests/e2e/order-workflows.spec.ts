@@ -218,7 +218,7 @@ test('pepsa-order overview read and fleet refresh mutation', async ({ page }) =>
   await page.goto('/p/pepsa-order/overview');
   await expect(page.getByRole('heading', { name: 'Order overview' })).toBeVisible();
   await expect(page.getByText('Fleet health')).toBeVisible();
-  await expect(page.getByText('healthy')).toBeVisible();
+  await expect(page.getByText('healthy').first()).toBeVisible();
   await expect(page.getByText('Processing pool')).toBeVisible();
   await expect(page.getByText('Dispatch tasks')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Order overview' })).toBeVisible();

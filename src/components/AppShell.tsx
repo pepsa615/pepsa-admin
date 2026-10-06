@@ -85,13 +85,12 @@ export function AppShell() {
     [selectedPlatform?.key],
   );
   const supportedOperations = new Set(capabilities.data?.operations.map(({ key }) => key) ?? []);
-  const capabilitiesReady = Boolean(capabilities.data) && !capabilities.error;
   const navVisible = (permission: string, operation: string) => {
     if (!auth.can(permission)) return false;
-    // Soft-filter by destination capabilities only when the catalogue loaded.
-    // If the env is DISABLED or the adapter is unreachable, still show links so
-    // operators can open pages / see enablement errors instead of an empty sidebar.
-    if (!capabilitiesReady) return true;
+    // If destination capabilities errored (e.g. env disabled or adapter unreachable),
+    // still show links so operators can open pages / see enablement errors.
+    if (capabilities.error) return true;
+    if (capabilities.loading && !capabilities.data) return false;
     return supportedOperations.has(operation);
   };
   return (
