@@ -1523,7 +1523,9 @@ export function TransactionsPage() {
       row={(item) => (
         <>
           <td>{item.business.name}</td>
-          <td><StatusBadge value={item.environment} /></td>
+          <td>
+            <StatusBadge value={item.environment} />
+          </td>
           <td>{item.type}</td>
           <td>{item.category}</td>
           <td>
@@ -1548,7 +1550,9 @@ export function InvoicesPage() {
       row={(item) => (
         <>
           <td>{item.business.name}</td>
-          <td><StatusBadge value={item.environment} /></td>
+          <td>
+            <StatusBadge value={item.environment} />
+          </td>
           <td>{item.billingCycle}</td>
           <td>
             <StatusBadge value={item.status} />

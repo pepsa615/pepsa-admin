@@ -20,6 +20,8 @@ const paymentPlatform = {
 };
 
 const paymentOperations = [
+  { key: 'platforms-list', method: 'GET', permission: 'payment.platforms.read', risk: 'low' },
+  { key: 'platforms-get', method: 'GET', permission: 'payment.platforms.read', risk: 'low' },
   { key: 'platforms-onboard', method: 'POST', permission: 'payment.platforms.write', risk: 'high' },
   {
     key: 'platforms-rotate-key',
@@ -27,7 +29,12 @@ const paymentOperations = [
     permission: 'payment.platforms.keys.rotate',
     risk: 'critical',
   },
-  { key: 'platforms-status', method: 'POST', permission: 'payment.platforms.status', risk: 'high' },
+  {
+    key: 'platforms-status',
+    method: 'POST',
+    permission: 'payment.platforms.status',
+    risk: 'critical',
+  },
   {
     key: 'transfer-settings-get',
     method: 'GET',
@@ -154,11 +161,62 @@ async function mockPaymentApi(page: Page, permissions: string[]) {
 
     if (path.endsWith('/operations/pepsa-payment/sva-provisioning-list'))
       return json(route, {
-        data: { items: [{ userId: 'user-1', status: 'PENDING' }, { userId: 'user-2', status: 'FAILED' }] },
+        data: {
+          items: [
+            { userId: 'user-1', status: 'PENDING' },
+            { userId: 'user-2', status: 'FAILED' },
+          ],
+        },
       });
     if (path.endsWith('/operations/pepsa-payment/checkout-provisioning-list'))
       return json(route, {
         data: { items: [{ checkoutId: 'chk-1', status: 'ACTIVE' }] },
+      });
+    if (path.endsWith('/operations/pepsa-payment/platforms-list'))
+      return json(route, {
+        data: {
+          data: [
+            {
+              platform_id: 'plat-sandbox-1',
+              name: 'Sandbox Platform',
+              status: 'active',
+              created_at: '2026-09-18T10:00:00.000Z',
+            },
+          ],
+          next_cursor: null,
+        },
+      });
+    if (path.endsWith('/operations/pepsa-payment/transfer-settings-get'))
+      return json(route, {
+        data: {
+          platform_id: 'plat-sandbox-1',
+          internal_transfer_fee: '0.00',
+          external_transfer_fee: '25.00',
+          stamp_duty_amount: '50.00',
+          stamp_duty_minimum_threshold: '10000.00',
+          active: true,
+        },
+      });
+    if (path.endsWith('/operations/pepsa-payment/vas-settings-get'))
+      return json(route, {
+        data: {
+          platform_id: 'plat-sandbox-1',
+          airtime_fee: '20.00',
+          data_fee: '25.00',
+          electricity_fee: '50.00',
+          cable_tv_fee: '40.00',
+          other_fee: '0.00',
+          active: true,
+        },
+      });
+    if (path.endsWith('/operations/pepsa-payment/settlement-settings-get'))
+      return json(route, {
+        data: {
+          platform_id: 'plat-sandbox-1',
+          escrow_hold_hours: 24,
+          checkout_expiry_hours: 1,
+          active: true,
+        },
       });
     if (path.endsWith('/operations/pepsa-payment/platforms-rotate-key') && method === 'POST')
       return json(route, { data: { apiKey: 'pp_live_rotated' } });
@@ -172,20 +230,24 @@ test('pepsa-payment overview read and rotate-key mutation with step-up', async (
   await mockPaymentApi(page, [
     'payment.sva.provisioning.read',
     'payment.checkout.provisioning.read',
+    'payment.platforms.read',
     'payment.platforms.write',
     'payment.platforms.keys.rotate',
   ]);
 
   let rotateBody: Record<string, unknown> | undefined;
   let rotateIdempotencyKey: string | undefined;
-  await page.route('**/admin-api/v1/operations/pepsa-payment/platforms-rotate-key', async (route) => {
-    if (route.request().method() === 'POST') {
-      rotateBody = route.request().postDataJSON() as Record<string, unknown>;
-      rotateIdempotencyKey = route.request().headers()['idempotency-key'];
-      return json(route, { data: { apiKey: 'pp_live_rotated' } });
-    }
-    return route.fallback();
-  });
+  await page.route(
+    '**/admin-api/v1/operations/pepsa-payment/platforms-rotate-key',
+    async (route) => {
+      if (route.request().method() === 'POST') {
+        rotateBody = route.request().postDataJSON() as Record<string, unknown>;
+        rotateIdempotencyKey = route.request().headers()['idempotency-key'];
+        return json(route, { data: { apiKey: 'pp_live_rotated' } });
+      }
+      return route.fallback();
+    },
+  );
 
   await page.goto('/p/pepsa-payment/overview');
   await expect(page.getByRole('heading', { name: 'Payment overview' })).toBeVisible();
@@ -196,21 +258,68 @@ test('pepsa-payment overview read and rotate-key mutation with step-up', async (
 
   await page.getByRole('link', { name: 'Payment platforms' }).click();
   await expect(page.getByRole('heading', { name: 'Platforms' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Payment platforms' })).toBeVisible();
+  await expect(page.getByText('Sandbox Platform')).toBeVisible();
+  await expect(page.locator('pre.code-block')).toHaveCount(0);
   await page.getByRole('button', { name: 'Verify MFA' }).click();
   await page.getByLabel('Authenticator code').fill('123456');
   await page.getByRole('button', { name: 'Verify', exact: true }).click();
-  await page.getByLabel('Platform ID').fill('plat-sandbox-1');
-  await page.getByRole('button', { name: 'Rotate API key' }).click();
+  await page.getByRole('button', { name: 'Rotate key' }).click();
   await page.getByLabel('Business reason').fill('Scheduled quarterly platform API key rotation');
   await page.getByRole('button', { name: 'Rotate key', exact: true }).click();
 
-  await expect.poll(() => rotateBody).toEqual({
-    reason: 'Scheduled quarterly platform API key rotation',
-    payload: { platformId: 'plat-sandbox-1' },
-    approvalId: 'approval-rotate',
-  });
+  await expect
+    .poll(() => rotateBody)
+    .toEqual({
+      reason: 'Scheduled quarterly platform API key rotation',
+      payload: { platformId: 'plat-sandbox-1' },
+      approvalId: 'approval-rotate',
+    });
   expect(rotateIdempotencyKey).toBeTruthy();
   await expect(page.getByText('pp_live_rotated')).toBeVisible();
+});
+
+test('pepsa-payment settings patch sends fee fields', async ({ page }) => {
+  test.setTimeout(90_000);
+  await mockPaymentApi(page, [
+    'payment.platforms.read',
+    'payment.settings.transfer',
+    'payment.settings.vas',
+    'payment.settings.settlement',
+  ]);
+
+  let patchBody: Record<string, unknown> | undefined;
+  await page.route(
+    '**/admin-api/v1/operations/pepsa-payment/transfer-settings-patch',
+    async (route) => {
+      if (route.request().method() === 'POST') {
+        patchBody = route.request().postDataJSON() as Record<string, unknown>;
+        return json(route, { data: { ok: true } });
+      }
+      return route.fallback();
+    },
+  );
+
+  await page.goto('/p/pepsa-payment/settings?platformId=plat-sandbox-1');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByText('Internal fee')).toBeVisible();
+  await expect(page.locator('pre.code-block')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit transfer settings' }).click();
+  await page.getByLabel('Internal transfer fee').fill('1.50');
+  await page.getByLabel('Business reason').fill('Adjust internal transfer fee for sandbox');
+  await page.getByRole('button', { name: 'Submit update' }).click();
+
+  await expect
+    .poll(() => patchBody)
+    .toMatchObject({
+      reason: 'Adjust internal transfer fee for sandbox',
+      payload: {
+        platformId: 'plat-sandbox-1',
+        internal_transfer_fee: '1.50',
+        external_transfer_fee: '25.00',
+        active: true,
+      },
+    });
 });
 
 test('pepsa-payment overview denies without sva read permission', async ({ page }) => {

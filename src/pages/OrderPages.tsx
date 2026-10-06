@@ -1,5 +1,15 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../app/AuthContext.js';
+import {
+  ChipList,
+  DetailPanel,
+  ReasonModal,
+  asRecords,
+  formatMaybeDate,
+  pickString,
+  scalar,
+  type JsonRecord,
+} from '../components/OpsUi.js';
 import { Page } from '../components/Page.js';
 import { StepUpDialog } from '../components/StepUpDialog.js';
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from '../components/States.js';
@@ -10,79 +20,96 @@ import { useAsync } from '../core/useAsync.js';
 
 const PLATFORM = 'pepsa-order';
 
-type JsonRecord = Record<string, unknown>;
+const MOBILITY_TYPES = [
+  'MOTORCYCLE',
+  'MOTORCYCLE_CART',
+  'TRICYCLE',
+  'CAR',
+  'VAN',
+  'TRUCK',
+  'LONG_TRUCK',
+] as const;
 
-function asRecords(value: unknown): JsonRecord[] {
-  if (Array.isArray(value)) return value as JsonRecord[];
-  if (value && typeof value === 'object') {
-    const record = value as JsonRecord;
-    for (const key of ['items', 'data', 'results', 'riders', 'tasks', 'integrations', 'events']) {
-      if (Array.isArray(record[key])) return record[key] as JsonRecord[];
-    }
-  }
-  return [];
-}
-
-function display(value: unknown) {
-  if (value == null) return '—';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
-    return String(value);
-  return JSON.stringify(value);
-}
-
-function ReasonModal(props: {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  busy?: boolean;
-  error?: string;
-  children?: ReactNode;
-  onClose: () => void;
-  onSubmit: (reason: string) => Promise<void>;
-}) {
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+function PolicyView(props: { policy: JsonRecord | undefined }) {
+  const policy = props.policy;
+  if (!policy) return null;
+  const capacities = Array.isArray(policy.capacities) ? (policy.capacities as JsonRecord[]) : [];
   return (
-    <div className="modal-backdrop" role="presentation" onClick={props.onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="order-reason-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <h2 id="order-reason-title">{props.title}</h2>
-        </header>
-        <p>{props.description}</p>
-        {props.children}
-        <label>
-          Business reason
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            rows={3}
-            placeholder="Explain why this change is required"
-          />
-        </label>
-        {props.error ? <p className="form-error">{props.error}</p> : null}
-        <footer>
-          <button className="button secondary" type="button" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button
-            className="button primary"
-            type="button"
-            disabled={submitting || props.busy || reason.trim().length < 8}
-            onClick={() => {
-              setSubmitting(true);
-              void props.onSubmit(reason.trim()).finally(() => setSubmitting(false));
-            }}
-          >
-            {props.confirmLabel}
-          </button>
-        </footer>
-      </div>
+    <>
+      <DetailPanel
+        entries={[
+          { label: 'Version', value: scalar(policy.version) },
+          {
+            label: 'Active',
+            value: <StatusBadge value={String(policy.active ?? false)} />,
+          },
+          { label: 'Fleet freshness (s)', value: scalar(policy.fleetFreshnessSeconds) },
+          {
+            label: 'Grouping proximity (m)',
+            value: scalar(policy.groupingProximityMeters),
+          },
+          { label: 'Pickup service (s)', value: scalar(policy.pickupServiceSeconds) },
+          { label: 'Delivery service (s)', value: scalar(policy.deliveryServiceSeconds) },
+          { label: 'Degraded speed (kph)', value: scalar(policy.degradedSpeedKph) },
+          { label: 'Created', value: formatMaybeDate(policy.createdAt) },
+          { label: 'Actor', value: scalar(policy.actorId) },
+        ]}
+      />
+      {capacities.length ? (
+        <div className="table-panel">
+          <table aria-label="Policy capacities">
+            <thead>
+              <tr>
+                <th>Mobility</th>
+                <th>Minimum</th>
+                <th>Maximum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capacities.map((row, index) => (
+                <tr key={String(row.mobilityType ?? index)}>
+                  <td>{scalar(row.mobilityType)}</td>
+                  <td>{scalar(row.minimum)}</td>
+                  <td>{row.maximum == null ? '∞' : scalar(row.maximum)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function EventTable(props: { rows: JsonRecord[]; label: string }) {
+  if (!props.rows.length)
+    return <EmptyState title={`No ${props.label}`} description="Nothing to show yet." />;
+  return (
+    <div className="table-panel">
+      <table aria-label={props.label}>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Type / action</th>
+            <th>Status</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.map((row, index) => (
+            <tr key={String(row.id ?? row.eventId ?? index)}>
+              <td>
+                <code>{scalar(row.id ?? row.eventId ?? row.deliveryId)}</code>
+              </td>
+              <td>{scalar(row.type ?? row.action ?? row.eventType ?? row.name)}</td>
+              <td>
+                <StatusBadge value={String(row.status ?? row.state ?? '—')} />
+              </td>
+              <td>{formatMaybeDate(row.createdAt ?? row.occurredAt ?? row.timestamp)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -100,7 +127,7 @@ export function OrderOverviewPage() {
     <Page
       eyebrow="Pepsa Order"
       title="Order overview"
-      description="Fleet, processing, and dispatch posture through the pepsa-order admin contract."
+      description="Fleet, processing pool, and dispatch posture through the pepsa-order admin contract."
     >
       {loading ? (
         <LoadingState />
@@ -118,23 +145,23 @@ export function OrderOverviewPage() {
         <div className="metric-grid">
           <article className="metric">
             <span>Fleet health</span>
-            <strong>{display(health.data?.status ?? health.data?.state ?? 'ok')}</strong>
-            <small>Latest probe</small>
+            <strong>{scalar(health.data?.status ?? health.data?.state ?? 'ok')}</strong>
+            <small>healthy</small>
           </article>
           <article className="metric">
             <span>Processing pool</span>
             <strong>{poolCount}</strong>
-            <small>Visible pool rows</small>
+            <small>Visible rows</small>
           </article>
           <article className="metric">
             <span>Dispatch tasks</span>
             <strong>{taskCount}</strong>
-            <small>Visible tasks</small>
+            <small>Visible rows</small>
           </article>
           <article className="metric">
             <span>Metrics</span>
-            <strong>{typeof metrics.data === 'string' ? 'stream' : 'ready'}</strong>
-            <small>Operations metrics endpoint</small>
+            <strong>{metrics.data ? 'ready' : 'empty'}</strong>
+            <small>Prometheus scrape</small>
           </article>
         </div>
       )}
@@ -144,20 +171,54 @@ export function OrderOverviewPage() {
 
 export function OrderPartnersPage() {
   const auth = useAuth();
+  const partners = useAsync(() => api.operation<unknown>(PLATFORM, 'partners-list'), []);
   const catalog = useAsync(() => api.operation<JsonRecord>(PLATFORM, 'catalog-read'), []);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [credential, setCredential] = useState<'issue' | 'revoke'>();
-  const [partnerId, setPartnerId] = useState('');
-  const [credentialId, setCredentialId] = useState('');
+  const [selectedId, setSelectedId] = useState('');
+  const detail = useAsync(
+    () =>
+      selectedId
+        ? api.operation<JsonRecord>(
+            PLATFORM,
+            'partners-get',
+            `?${new URLSearchParams({ partnerId: selectedId })}`,
+          )
+        : Promise.resolve(undefined),
+    [selectedId],
+  );
+  const [modal, setModal] = useState<
+    | 'create'
+    | 'activate'
+    | 'deactivate'
+    | 'user'
+    | 'cost-profile'
+    | 'authorize'
+    | 'issue'
+    | 'revoke'
+  >();
+  const [partnerApiId, setPartnerApiId] = useState('');
   const [partnerName, setPartnerName] = useState('');
+  const [subId, setSubId] = useState('');
+  const [costCode, setCostCode] = useState('');
+  const [costName, setCostName] = useState('');
+  const [costProfileId, setCostProfileId] = useState('');
+  const [credentialId, setCredentialId] = useState('');
+  const [oneTimeToken, setOneTimeToken] = useState('');
   const [error, setError] = useState('');
-  const [stepUp, setStepUp] = useState(false);
   const [message, setMessage] = useState('');
+  const [stepUp, setStepUp] = useState(false);
+  const rows = asRecords(partners.data);
+  const catalogCategories = asRecords(catalog.data?.categories);
+  const catalogScopes = asRecords(catalog.data?.deliveryScopes);
+  const catalogMobility = asRecords(catalog.data?.mobilityTypes);
+  const detailUsers = asRecords(detail.data?.users);
+  const detailProfiles = asRecords(detail.data?.costProfiles);
+  const detailCredentials = asRecords(detail.data?.credentials);
+
   return (
     <Page
       eyebrow="Pepsa Order"
       title="Partners and credentials"
-      description="Partner lifecycle, catalog reference, and credential issue or revoke with attributed reasons."
+      description="Browse partners, manage lifecycle, and issue or revoke credentials with attributed reasons."
       action={
         <div className="inline-actions">
           {auth.can('order.credentials.issue') || auth.can('order.credentials.revoke') ? (
@@ -166,7 +227,13 @@ export function OrderPartnersPage() {
             </button>
           ) : null}
           {auth.can('order.partners.write') ? (
-            <button className="button primary" onClick={() => setCreateOpen(true)}>
+            <button
+              className="button primary"
+              onClick={() => {
+                setError('');
+                setModal('create');
+              }}
+            >
               Create partner
             </button>
           ) : null}
@@ -174,81 +241,338 @@ export function OrderPartnersPage() {
       }
     >
       {message ? <p className="banner success">{message}</p> : null}
+      {oneTimeToken ? (
+        <p className="banner success" role="status">
+          One-time credential token (copy now): <code>{oneTimeToken}</code>
+        </p>
+      ) : null}
+
       <h2>Catalog</h2>
       {catalog.loading ? (
         <LoadingState />
       ) : catalog.error ? (
         <ErrorState error={catalog.error} retry={catalog.reload} />
       ) : (
-        <pre className="code-block">{JSON.stringify(catalog.data ?? {}, null, 2)}</pre>
+        <>
+          <ChipList
+            title="Categories"
+            items={catalogCategories.map((item) => ({
+              code: pickString(item, 'code'),
+              name: pickString(item, 'name'),
+            }))}
+          />
+          <ChipList
+            title="Delivery scopes"
+            items={catalogScopes.map((item) => ({
+              code: pickString(item, 'code'),
+              name: pickString(item, 'name'),
+            }))}
+          />
+          <ChipList
+            title="Mobility types"
+            items={catalogMobility.map((item) => ({
+              code: pickString(item, 'code'),
+              name: pickString(item, 'name'),
+            }))}
+          />
+        </>
       )}
-      <h2 className="section-title">Credentials</h2>
-      <div className="filter-bar">
-        <label>
-          Partner ID
-          <input
-            value={partnerId}
-            onChange={(event) => setPartnerId(event.target.value)}
-            placeholder="Partner UUID"
-          />
-        </label>
-        <label>
-          Credential ID
-          <input
-            value={credentialId}
-            onChange={(event) => setCredentialId(event.target.value)}
-            placeholder="Credential UUID"
-          />
-        </label>
-        {auth.can('order.credentials.issue') ? (
-          <button
-            className="button secondary"
-            disabled={!partnerId.trim()}
-            onClick={() => {
-              setError('');
-              setCredential('issue');
-            }}
-          >
-            Issue credential
-          </button>
-        ) : null}
-        {auth.can('order.credentials.revoke') ? (
-          <button
-            className="button danger"
-            disabled={!credentialId.trim()}
-            onClick={() => {
-              setError('');
-              setCredential('revoke');
-            }}
-          >
-            Revoke credential
-          </button>
-        ) : null}
-      </div>
-      {createOpen ? (
+
+      <h2 className="section-title">Partners</h2>
+      {partners.loading ? (
+        <LoadingState />
+      ) : partners.error ? (
+        <ErrorState error={partners.error} retry={partners.reload} />
+      ) : !rows.length ? (
+        <EmptyState
+          title="No partners"
+          description="Create a partner to populate the order tenant directory."
+        />
+      ) : (
+        <div className="table-panel">
+          <table aria-label="Order partners">
+            <thead>
+              <tr>
+                <th>API ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const id = pickString(row, 'partnerId', 'id') ?? '';
+                return (
+                  <tr key={id}>
+                    <td>
+                      <code>{scalar(row.apiId)}</code>
+                    </td>
+                    <td>{scalar(row.name)}</td>
+                    <td>
+                      <StatusBadge value={row.active ? 'ACTIVE' : 'INACTIVE'} />
+                    </td>
+                    <td>{formatMaybeDate(row.createdAt)}</td>
+                    <td>
+                      <div className="inline-actions">
+                        <button
+                          className="text-link"
+                          type="button"
+                          onClick={() => setSelectedId(id)}
+                        >
+                          Open
+                        </button>
+                        {auth.can('order.partners.write') ? (
+                          <button
+                            className="text-link"
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(id);
+                              setError('');
+                              setModal(row.active ? 'deactivate' : 'activate');
+                            }}
+                          >
+                            {row.active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selectedId ? (
+        <>
+          <h2 className="section-title">Partner detail</h2>
+          {detail.loading ? (
+            <LoadingState />
+          ) : detail.error ? (
+            <ErrorState error={detail.error} retry={detail.reload} />
+          ) : detail.data ? (
+            <>
+              <DetailPanel
+                entries={[
+                  { label: 'Partner ID', value: <code>{selectedId}</code> },
+                  { label: 'API ID', value: scalar(detail.data.apiId) },
+                  { label: 'Name', value: scalar(detail.data.name) },
+                  {
+                    label: 'Active',
+                    value: <StatusBadge value={detail.data.active ? 'ACTIVE' : 'INACTIVE'} />,
+                  },
+                  { label: 'Created', value: formatMaybeDate(detail.data.createdAt) },
+                ]}
+              />
+              <div className="inline-actions">
+                {auth.can('order.partners.write') ? (
+                  <>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setModal('user');
+                      }}
+                    >
+                      Add user
+                    </button>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setModal('cost-profile');
+                      }}
+                    >
+                      Create cost profile
+                    </button>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        setModal('authorize');
+                      }}
+                    >
+                      Authorize cost profile
+                    </button>
+                  </>
+                ) : null}
+                {auth.can('order.credentials.issue') ? (
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => {
+                      setError('');
+                      setModal('issue');
+                    }}
+                  >
+                    Issue credential
+                  </button>
+                ) : null}
+              </div>
+              <h3>Users</h3>
+              {detailUsers.length ? (
+                <div className="table-panel">
+                  <table aria-label="Partner users">
+                    <thead>
+                      <tr>
+                        <th>Sub ID</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailUsers.map((user) => (
+                        <tr key={String(user.partnerUserId ?? user.subId)}>
+                          <td>{scalar(user.subId)}</td>
+                          <td>
+                            <StatusBadge value={user.active ? 'ACTIVE' : 'INACTIVE'} />
+                          </td>
+                          <td>{formatMaybeDate(user.createdAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState title="No users" description="Register a partner sub-user mapping." />
+              )}
+              <h3>Cost profiles</h3>
+              {detailProfiles.length ? (
+                <div className="table-panel">
+                  <table aria-label="Partner cost profiles">
+                    <thead>
+                      <tr>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailProfiles.map((profile) => (
+                        <tr key={String(profile.costProfileId)}>
+                          <td>
+                            <code>{scalar(profile.code)}</code>
+                          </td>
+                          <td>{scalar(profile.name)}</td>
+                          <td>
+                            <StatusBadge value={profile.active ? 'ACTIVE' : 'INACTIVE'} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No cost profiles"
+                  description="Create and authorize a cost profile for this partner."
+                />
+              )}
+              <h3>Credentials</h3>
+              {detailCredentials.length ? (
+                <div className="table-panel">
+                  <table aria-label="Partner credentials">
+                    <thead>
+                      <tr>
+                        <th>Selector</th>
+                        <th>Scopes</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailCredentials.map((credential) => {
+                        const id = pickString(credential, 'credentialId', 'id') ?? '';
+                        return (
+                          <tr key={id}>
+                            <td>
+                              <code>{scalar(credential.selector)}</code>
+                            </td>
+                            <td>
+                              {Array.isArray(credential.scopes)
+                                ? credential.scopes.map(String).join(', ')
+                                : '—'}
+                            </td>
+                            <td>
+                              <StatusBadge
+                                value={
+                                  credential.revokedAt
+                                    ? 'REVOKED'
+                                    : credential.active
+                                      ? 'ACTIVE'
+                                      : 'INACTIVE'
+                                }
+                              />
+                            </td>
+                            <td>
+                              {auth.can('order.credentials.revoke') && !credential.revokedAt ? (
+                                <button
+                                  className="text-link"
+                                  type="button"
+                                  onClick={() => {
+                                    setCredentialId(id);
+                                    setError('');
+                                    setModal('revoke');
+                                  }}
+                                >
+                                  Revoke
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No credentials"
+                  description="Issue a credential to enable partner API access."
+                />
+              )}
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {modal === 'create' ? (
         <ReasonModal
           title="Create partner"
-          description="Provision a partner record in pepsa-order."
+          description="Create a partner tenant identity for pepsa-order intake."
           confirmLabel="Create partner"
           error={error}
-          onClose={() => {
-            setCreateOpen(false);
-            setPartnerName('');
-            setError('');
-          }}
+          onClose={() => setModal(undefined)}
           onSubmit={async (reason) => {
             try {
               await api.mutate(PLATFORM, 'partners-create', reason, {
+                apiId: partnerApiId.trim() || partnerName.trim().toUpperCase().replace(/\s+/g, '_'),
                 name: partnerName.trim() || 'New partner',
               });
-              setCreateOpen(false);
+              setModal(undefined);
+              setPartnerApiId('');
               setPartnerName('');
               setMessage('Partner create submitted.');
+              await partners.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Create failed');
             }
           }}
         >
+          <label>
+            API ID
+            <input
+              aria-label="Partner API ID"
+              value={partnerApiId}
+              onChange={(event) => setPartnerApiId(event.target.value)}
+              placeholder="BAS"
+            />
+          </label>
           <label>
             Partner name
             <input
@@ -260,69 +584,216 @@ export function OrderPartnersPage() {
           </label>
         </ReasonModal>
       ) : null}
-      {credential === 'issue' ? (
+
+      {modal === 'activate' || modal === 'deactivate' ? (
         <ReasonModal
-          title="Issue partner credential"
-          description={`Issue a credential for partner ${partnerId}. Plaintext is returned once.`}
-          confirmLabel="Issue credential"
+          title={modal === 'activate' ? 'Activate partner' : 'Deactivate partner'}
+          description={`${modal === 'activate' ? 'Enable' : 'Disable'} partner ${selectedId}.`}
+          confirmLabel={modal === 'activate' ? 'Activate' : 'Deactivate'}
           error={error}
-          onClose={() => setCredential(undefined)}
+          onClose={() => setModal(undefined)}
           onSubmit={async (reason) => {
             try {
-              const payload = {
-                partnerId: partnerId.trim(),
-                scopes: ['orders:create', 'orders:read'],
-              };
+              await api.mutate(PLATFORM, 'partners-update', reason, {
+                partnerId: selectedId,
+                active: modal === 'activate',
+              });
+              setModal(undefined);
+              setMessage('Partner update submitted.');
+              await Promise.all([partners.reload(), detail.reload()]);
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Update failed');
+            }
+          }}
+        />
+      ) : null}
+
+      {modal === 'user' ? (
+        <ReasonModal
+          title="Add partner user"
+          description={`Register a sub-user mapping for partner ${selectedId}.`}
+          confirmLabel="Add user"
+          error={error}
+          onClose={() => setModal(undefined)}
+          onSubmit={async (reason) => {
+            try {
+              await api.mutate(PLATFORM, 'partners-users-create', reason, {
+                partnerId: selectedId,
+                subId: subId.trim(),
+              });
+              setModal(undefined);
+              setSubId('');
+              setMessage('Partner user submitted.');
+              await detail.reload();
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Add user failed');
+            }
+          }}
+        >
+          <label>
+            Sub ID
+            <input
+              aria-label="Partner sub ID"
+              value={subId}
+              onChange={(event) => setSubId(event.target.value)}
+              placeholder="bas-business-1002"
+            />
+          </label>
+        </ReasonModal>
+      ) : null}
+
+      {modal === 'cost-profile' ? (
+        <ReasonModal
+          title="Create cost profile"
+          description="Create a pricing profile identity, then authorize it for a partner."
+          confirmLabel="Create profile"
+          error={error}
+          onClose={() => setModal(undefined)}
+          onSubmit={async (reason) => {
+            try {
+              const result = await api.mutate<JsonRecord>(
+                PLATFORM,
+                'cost-profiles-create',
+                reason,
+                {
+                  code: costCode.trim() || 'PLATFORM',
+                  name: costName.trim() || 'Platform pricing',
+                },
+              );
+              const createdId = pickString(result, 'costProfileId');
+              if (createdId) setCostProfileId(createdId);
+              setModal(undefined);
+              setMessage(
+                createdId
+                  ? `Cost profile created (${createdId}). Authorize it next.`
+                  : 'Cost profile create submitted.',
+              );
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Create failed');
+            }
+          }}
+        >
+          <label>
+            Code
+            <input
+              aria-label="Cost profile code"
+              value={costCode}
+              onChange={(event) => setCostCode(event.target.value)}
+              placeholder="BAS_PLATFORM"
+            />
+          </label>
+          <label>
+            Name
+            <input
+              aria-label="Cost profile name"
+              value={costName}
+              onChange={(event) => setCostName(event.target.value)}
+              placeholder="BAS calculated pricing"
+            />
+          </label>
+        </ReasonModal>
+      ) : null}
+
+      {modal === 'authorize' ? (
+        <ReasonModal
+          title="Authorize cost profile"
+          description={`Authorize a cost profile for partner ${selectedId}.`}
+          confirmLabel="Authorize"
+          error={error}
+          onClose={() => setModal(undefined)}
+          onSubmit={async (reason) => {
+            try {
+              await api.mutate(PLATFORM, 'partners-cost-profile-authorize', reason, {
+                partnerId: selectedId,
+                costProfileId: costProfileId.trim(),
+              });
+              setModal(undefined);
+              setMessage('Cost profile authorization submitted.');
+              await detail.reload();
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Authorize failed');
+            }
+          }}
+        >
+          <label>
+            Cost profile ID
+            <input
+              aria-label="Cost profile ID"
+              value={costProfileId}
+              onChange={(event) => setCostProfileId(event.target.value)}
+              placeholder="Cost profile UUID"
+            />
+          </label>
+        </ReasonModal>
+      ) : null}
+
+      {modal === 'issue' ? (
+        <ReasonModal
+          title="Issue partner credential"
+          description={`Issue a credential for partner ${selectedId}. Plaintext is returned once.`}
+          confirmLabel="Issue credential"
+          error={error}
+          onClose={() => setModal(undefined)}
+          onSubmit={async (reason) => {
+            try {
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'credentials-issue',
                 reason,
-                payload,
+                payload: {
+                  partnerId: selectedId,
+                  scopes: ['orders:create', 'orders:read', 'payments:initiate'],
+                },
                 requesterId: auth.session?.user.id,
               });
               if (outcome.status === 'requested') {
                 setMessage(criticalRequestMessage('credentials-issue'));
-                setCredential(undefined);
+                setModal(undefined);
                 return;
               }
-              setCredential(undefined);
+              const token = (outcome.result as JsonRecord)?.token;
+              if (typeof token === 'string' && token) setOneTimeToken(token);
+              setModal(undefined);
               setMessage('Credential issue submitted.');
+              await detail.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Issue failed');
             }
           }}
         />
       ) : null}
-      {credential === 'revoke' ? (
+
+      {modal === 'revoke' ? (
         <ReasonModal
           title="Revoke partner credential"
           description={`Immediately revoke credential ${credentialId}.`}
           confirmLabel="Revoke credential"
           error={error}
-          onClose={() => setCredential(undefined)}
+          onClose={() => setModal(undefined)}
           onSubmit={async (reason) => {
             try {
-              const payload = { credentialId: credentialId.trim() };
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'credentials-revoke',
                 reason,
-                payload,
+                payload: { credentialId: credentialId.trim() },
                 requesterId: auth.session?.user.id,
               });
               if (outcome.status === 'requested') {
                 setMessage(criticalRequestMessage('credentials-revoke'));
-                setCredential(undefined);
+                setModal(undefined);
                 return;
               }
-              setCredential(undefined);
+              setModal(undefined);
               setMessage('Credential revoke submitted.');
+              await detail.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Revoke failed');
             }
           }}
         />
       ) : null}
+
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
     </Page>
   );
@@ -333,7 +804,7 @@ export function OrderFleetPage() {
   const health = useAsync(() => api.operation<JsonRecord>(PLATFORM, 'fleet-health'), []);
   const riders = useAsync(() => api.operation<unknown>(PLATFORM, 'fleet-riders'), []);
   const [evaluateResult, setEvaluateResult] = useState<JsonRecord>();
-  const [mobility, setMobility] = useState('BIKE');
+  const [mobility, setMobility] = useState('MOTORCYCLE');
   const [load, setLoad] = useState('1');
   const [error, setError] = useState('');
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -359,7 +830,7 @@ export function OrderFleetPage() {
         <div className="metric-grid">
           <article className="metric">
             <span>Health</span>
-            <strong>{display(health.data?.status ?? health.data?.state ?? 'unknown')}</strong>
+            <strong>{scalar(health.data?.status ?? health.data?.state ?? 'unknown')}</strong>
             <small>Fleet probe</small>
           </article>
         </div>
@@ -370,7 +841,10 @@ export function OrderFleetPage() {
       ) : riders.error ? (
         <ErrorState error={riders.error} retry={riders.reload} />
       ) : !riderRows.length ? (
-        <EmptyState title="No riders" description="Fleet riders will appear after a successful sync." />
+        <EmptyState
+          title="No riders"
+          description="Fleet riders will appear after a successful sync."
+        />
       ) : (
         <div className="table-panel">
           <table aria-label="Fleet riders">
@@ -386,9 +860,9 @@ export function OrderFleetPage() {
               {riderRows.map((rider, index) => (
                 <tr key={String(rider.id ?? rider.externalId ?? index)}>
                   <td>
-                    <code>{display(rider.id ?? rider.externalId)}</code>
+                    <code>{scalar(rider.id ?? rider.externalId)}</code>
                   </td>
-                  <td>{display(rider.name ?? rider.displayName ?? rider.externalId)}</td>
+                  <td>{scalar(rider.name ?? rider.displayName ?? rider.externalId)}</td>
                   <td>
                     <StatusBadge value={String(rider.status ?? rider.state ?? 'UNKNOWN')} />
                   </td>
@@ -433,7 +907,32 @@ export function OrderFleetPage() {
       </div>
       {error ? <p className="form-error">{error}</p> : null}
       {evaluateResult ? (
-        <pre className="code-block">{JSON.stringify(evaluateResult, null, 2)}</pre>
+        <DetailPanel
+          title="Evaluate result"
+          entries={[
+            { label: 'Status', value: scalar(evaluateResult.status ?? evaluateResult.state) },
+            {
+              label: 'Available',
+              value: scalar(evaluateResult.available ?? evaluateResult.sufficient),
+            },
+            {
+              label: 'Required mobility',
+              value: scalar(evaluateResult.requiredMobility ?? mobility),
+            },
+            {
+              label: 'Additional load',
+              value: scalar(evaluateResult.additionalLoad ?? load),
+            },
+            {
+              label: 'Rider count',
+              value: scalar(evaluateResult.riderCount ?? evaluateResult.count),
+            },
+            {
+              label: 'Message',
+              value: scalar(evaluateResult.message ?? evaluateResult.reason),
+            },
+          ].filter((entry) => entry.value !== '—')}
+        />
       ) : null}
       {refreshOpen ? (
         <ReasonModal
@@ -464,8 +963,11 @@ export function OrderProcessingPage() {
   const [batchId, setBatchId] = useState('');
   const [detail, setDetail] = useState<JsonRecord>();
   const [action, setAction] = useState<'automatic' | 'optimize' | 'manual'>();
+  const [manualRiderId, setManualRiderId] = useState('');
+  const [manualShipmentIds, setManualShipmentIds] = useState('');
   const [error, setError] = useState('');
   const rows = asRecords(pool.data);
+  const assignmentRows = asRecords(detail?.assignments ?? detail?.batches);
   return (
     <Page
       eyebrow="Pepsa Order"
@@ -511,12 +1013,12 @@ export function OrderProcessingPage() {
               {rows.map((row, index) => (
                 <tr key={String(row.id ?? index)}>
                   <td>
-                    <code>{display(row.id ?? row.runId ?? row.batchId)}</code>
+                    <code>{scalar(row.id ?? row.runId ?? row.batchId)}</code>
                   </td>
                   <td>
                     <StatusBadge value={String(row.status ?? 'UNKNOWN')} />
                   </td>
-                  <td>{display(row.summary ?? row.type ?? row.partnerId)}</td>
+                  <td>{scalar(row.summary ?? row.type ?? row.partnerId)}</td>
                 </tr>
               ))}
             </tbody>
@@ -568,7 +1070,53 @@ export function OrderProcessingPage() {
         </button>
       </div>
       {error ? <p className="form-error">{error}</p> : null}
-      {detail ? <pre className="code-block">{JSON.stringify(detail, null, 2)}</pre> : null}
+      {detail ? (
+        <>
+          <DetailPanel
+            title="Run / batch detail"
+            entries={Object.entries(detail)
+              .filter(([key]) => key !== 'assignments' && key !== 'batches')
+              .slice(0, 12)
+              .map(([label, value]) => ({
+                label,
+                value:
+                  typeof value === 'object' && value !== null
+                    ? Array.isArray(value)
+                      ? `${value.length} items`
+                      : 'object'
+                    : scalar(value),
+              }))}
+          />
+          {assignmentRows.length ? (
+            <div className="table-panel">
+              <table aria-label="Assignments">
+                <thead>
+                  <tr>
+                    <th>Rider</th>
+                    <th>Shipments</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignmentRows.map((row, index) => (
+                    <tr key={String(row.riderId ?? row.id ?? index)}>
+                      <td>{scalar(row.riderId ?? row.rider)}</td>
+                      <td>
+                        {Array.isArray(row.shipmentIds)
+                          ? row.shipmentIds.map(String).join(', ')
+                          : scalar(row.shipmentId ?? row.count)}
+                      </td>
+                      <td>
+                        <StatusBadge value={String(row.status ?? '—')} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </>
+      ) : null}
       {action ? (
         <ReasonModal
           title={`Start ${action} run`}
@@ -584,14 +1132,51 @@ export function OrderProcessingPage() {
                   : action === 'optimize'
                     ? 'processing-run-optimize'
                     : 'processing-run-manual';
-              await api.mutate(PLATFORM, operation, reason, {});
+              const payload =
+                action === 'manual'
+                  ? {
+                      assignments: [
+                        {
+                          riderId: manualRiderId.trim(),
+                          shipmentIds: manualShipmentIds
+                            .split(/[\s,]+/)
+                            .map((entry) => entry.trim())
+                            .filter(Boolean),
+                        },
+                      ],
+                    }
+                  : {};
+              await api.mutate(PLATFORM, operation, reason, payload);
               setAction(undefined);
               await pool.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Run failed');
             }
           }}
-        />
+        >
+          {action === 'manual' ? (
+            <>
+              <label>
+                Rider ID
+                <input
+                  aria-label="Manual rider ID"
+                  value={manualRiderId}
+                  onChange={(event) => setManualRiderId(event.target.value)}
+                />
+              </label>
+              <label>
+                Shipment IDs
+                <textarea
+                  aria-label="Manual shipment IDs"
+                  rows={3}
+                  value={manualShipmentIds}
+                  onChange={(event) => setManualShipmentIds(event.target.value)}
+                  placeholder="Comma or whitespace separated UUIDs"
+                />
+              </label>
+            </>
+          ) : null}
+        </ReasonModal>
       ) : null}
     </Page>
   );
@@ -601,6 +1186,7 @@ export function OrderDispatchPage() {
   const auth = useAuth();
   const tasks = useAsync(() => api.operation<unknown>(PLATFORM, 'dispatch-tasks'), []);
   const [selectedTaskId, setSelectedTaskId] = useState('');
+  const [riderId, setRiderId] = useState('');
   const [refundId, setRefundId] = useState('');
   const [detail, setDetail] = useState<JsonRecord>();
   const [offerOpen, setOfferOpen] = useState(false);
@@ -626,7 +1212,10 @@ export function OrderDispatchPage() {
       ) : tasks.error ? (
         <ErrorState error={tasks.error} retry={tasks.reload} />
       ) : !rows.length ? (
-        <EmptyState title="No dispatch tasks" description="Tasks will appear as orders enter dispatch." />
+        <EmptyState
+          title="No dispatch tasks"
+          description="Tasks will appear as orders enter dispatch."
+        />
       ) : (
         <div className="table-panel">
           <table aria-label="Dispatch tasks">
@@ -649,7 +1238,7 @@ export function OrderDispatchPage() {
                     <td>
                       <StatusBadge value={String(task.status ?? 'UNKNOWN')} />
                     </td>
-                    <td>{display(task.shipmentId ?? task.orderId)}</td>
+                    <td>{scalar(task.shipmentId ?? task.orderId)}</td>
                     <td>
                       <button
                         className="text-link"
@@ -689,7 +1278,19 @@ export function OrderDispatchPage() {
           </table>
         </div>
       )}
-      {detail ? <pre className="code-block">{JSON.stringify(detail, null, 2)}</pre> : null}
+      {detail ? (
+        <DetailPanel
+          title={`Task ${selectedTaskId || ''}`}
+          entries={[
+            { label: 'Status', value: <StatusBadge value={String(detail.status ?? '—')} /> },
+            { label: 'Shipment', value: scalar(detail.shipmentId ?? detail.orderId) },
+            { label: 'Rider', value: scalar(detail.riderId ?? detail.assignedRiderId) },
+            { label: 'Partner', value: scalar(detail.partnerId) },
+            { label: 'Updated', value: formatMaybeDate(detail.updatedAt ?? detail.createdAt) },
+          ]}
+        />
+      ) : null}
+      {error ? <p className="form-error">{error}</p> : null}
       <h2 className="section-title">Refund retry</h2>
       <div className="filter-bar">
         <label>
@@ -720,14 +1321,26 @@ export function OrderDispatchPage() {
             try {
               await api.mutate(PLATFORM, 'dispatch-offer', reason, {
                 taskId: selectedTaskId,
+                riderId: riderId.trim(),
               });
               setOfferOpen(false);
+              setRiderId('');
               await tasks.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Offer failed');
             }
           }}
-        />
+        >
+          <label>
+            Rider ID
+            <input
+              aria-label="Offer rider ID"
+              value={riderId}
+              onChange={(event) => setRiderId(event.target.value)}
+              placeholder="Rider UUID"
+            />
+          </label>
+        </ReasonModal>
       ) : null}
       {refundOpen ? (
         <ReasonModal
@@ -738,12 +1351,11 @@ export function OrderDispatchPage() {
           onClose={() => setRefundOpen(false)}
           onSubmit={async (reason) => {
             try {
-              const payload = { refundId: refundId.trim() };
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'dispatch-refund-retry',
                 reason,
-                payload,
+                payload: { refundId: refundId.trim() },
                 requesterId: auth.session?.user.id,
               });
               if (outcome.status === 'requested') {
@@ -769,7 +1381,19 @@ export function OrderPoliciesPage() {
   const [version, setVersion] = useState('');
   const [historical, setHistorical] = useState<JsonRecord>();
   const [publishOpen, setPublishOpen] = useState(false);
-  const [policyBody, setPolicyBody] = useState('{}');
+  const [fleetFreshnessSeconds, setFleetFreshnessSeconds] = useState('300');
+  const [groupingProximityMeters, setGroupingProximityMeters] = useState('40000');
+  const [pickupServiceSeconds, setPickupServiceSeconds] = useState('300');
+  const [deliveryServiceSeconds, setDeliveryServiceSeconds] = useState('300');
+  const [degradedSpeedKph, setDegradedSpeedKph] = useState('30');
+  const [capacities, setCapacities] = useState(
+    () =>
+      MOBILITY_TYPES.map((mobilityType) => ({
+        mobilityType,
+        minimum: '10',
+        maximum: mobilityType.includes('TRUCK') ? '' : '20',
+      })) as Array<{ mobilityType: string; minimum: string; maximum: string }>,
+  );
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [stepUp, setStepUp] = useState(false);
@@ -799,7 +1423,7 @@ export function OrderPoliciesPage() {
       ) : active.error ? (
         <ErrorState error={active.error} retry={active.reload} />
       ) : (
-        <pre className="code-block">{JSON.stringify(active.data ?? {}, null, 2)}</pre>
+        <PolicyView policy={active.data} />
       )}
       <h2 className="section-title">Historical version</h2>
       <div className="filter-bar">
@@ -825,48 +1449,122 @@ export function OrderPoliciesPage() {
         </button>
       </div>
       {error ? <p className="form-error">{error}</p> : null}
-      {historical ? <pre className="code-block">{JSON.stringify(historical, null, 2)}</pre> : null}
+      {historical ? <PolicyView policy={historical} /> : null}
       {publishOpen ? (
-        <>
+        <ReasonModal
+          title="Publish operations policy"
+          description="Publishing activates a new immutable policy version. Dual approval is required."
+          confirmLabel="Publish"
+          error={error}
+          onClose={() => setPublishOpen(false)}
+          onSubmit={async (reason) => {
+            try {
+              const payload = {
+                fleetFreshnessSeconds: Number(fleetFreshnessSeconds),
+                groupingProximityMeters: Number(groupingProximityMeters),
+                pickupServiceSeconds: Number(pickupServiceSeconds),
+                deliveryServiceSeconds: Number(deliveryServiceSeconds),
+                degradedSpeedKph: Number(degradedSpeedKph),
+                capacities: capacities.map((row) => ({
+                  mobilityType: row.mobilityType,
+                  minimum: Number(row.minimum),
+                  maximum: row.maximum.trim() ? Number(row.maximum) : null,
+                })),
+              };
+              const outcome = await executeCriticalOperation({
+                platformKey: PLATFORM,
+                operation: 'policies-publish',
+                reason,
+                payload,
+                requesterId: auth.session?.user.id,
+              });
+              if (outcome.status === 'requested') {
+                setMessage(criticalRequestMessage('policies-publish'));
+                setPublishOpen(false);
+                return;
+              }
+              setPublishOpen(false);
+              setMessage('Policy publish submitted.');
+              await active.reload();
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Publish failed');
+            }
+          }}
+        >
           <label>
-            Policy JSON body
-            <textarea
-              aria-label="Policy JSON body"
-              rows={6}
-              value={policyBody}
-              onChange={(event) => setPolicyBody(event.target.value)}
+            Fleet freshness seconds
+            <input
+              aria-label="Fleet freshness seconds"
+              value={fleetFreshnessSeconds}
+              onChange={(event) => setFleetFreshnessSeconds(event.target.value)}
             />
           </label>
-          <ReasonModal
-            title="Publish operations policy"
-            description="Publishing activates a new immutable policy version. Dual approval is required."
-            confirmLabel="Publish"
-            error={error}
-            onClose={() => setPublishOpen(false)}
-            onSubmit={async (reason) => {
-              try {
-                const payload = JSON.parse(policyBody) as JsonRecord;
-                const outcome = await executeCriticalOperation({
-                  platformKey: PLATFORM,
-                  operation: 'policies-publish',
-                  reason,
-                  payload,
-                  requesterId: auth.session?.user.id,
-                });
-                if (outcome.status === 'requested') {
-                  setMessage(criticalRequestMessage('policies-publish'));
-                  setPublishOpen(false);
-                  return;
-                }
-                setPublishOpen(false);
-                setMessage('Policy publish submitted.');
-                await active.reload();
-              } catch (cause) {
-                setError(cause instanceof Error ? cause.message : 'Publish failed');
-              }
-            }}
-          />
-        </>
+          <label>
+            Grouping proximity meters
+            <input
+              aria-label="Grouping proximity meters"
+              value={groupingProximityMeters}
+              onChange={(event) => setGroupingProximityMeters(event.target.value)}
+            />
+          </label>
+          <label>
+            Pickup service seconds
+            <input
+              aria-label="Pickup service seconds"
+              value={pickupServiceSeconds}
+              onChange={(event) => setPickupServiceSeconds(event.target.value)}
+            />
+          </label>
+          <label>
+            Delivery service seconds
+            <input
+              aria-label="Delivery service seconds"
+              value={deliveryServiceSeconds}
+              onChange={(event) => setDeliveryServiceSeconds(event.target.value)}
+            />
+          </label>
+          <label>
+            Degraded speed kph
+            <input
+              aria-label="Degraded speed kph"
+              value={degradedSpeedKph}
+              onChange={(event) => setDegradedSpeedKph(event.target.value)}
+            />
+          </label>
+          {capacities.map((row, index) => (
+            <div key={row.mobilityType} className="filter-bar">
+              <strong>{row.mobilityType}</strong>
+              <label>
+                Min
+                <input
+                  aria-label={`${row.mobilityType} minimum`}
+                  value={row.minimum}
+                  onChange={(event) =>
+                    setCapacities((current) =>
+                      current.map((entry, entryIndex) =>
+                        entryIndex === index ? { ...entry, minimum: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              <label>
+                Max (blank = unlimited)
+                <input
+                  aria-label={`${row.mobilityType} maximum`}
+                  value={row.maximum}
+                  onChange={(event) =>
+                    setCapacities((current) =>
+                      current.map((entry, entryIndex) =>
+                        entryIndex === index ? { ...entry, maximum: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            </div>
+          ))}
+        </ReasonModal>
       ) : null}
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
     </Page>
@@ -875,10 +1573,9 @@ export function OrderPoliciesPage() {
 
 export function OrderEventsPage() {
   const auth = useAuth();
+  const partners = useAsync(() => api.operation<unknown>(PLATFORM, 'partners-list'), []);
   const [partnerId, setPartnerId] = useState('');
-  const query = partnerId.trim()
-    ? `?${new URLSearchParams({ partnerId: partnerId.trim() })}`
-    : '';
+  const query = partnerId.trim() ? `?${new URLSearchParams({ partnerId: partnerId.trim() })}` : '';
   const events = useAsync(
     () =>
       partnerId.trim()
@@ -894,9 +1591,13 @@ export function OrderEventsPage() {
     [partnerId],
   );
   const failures = useAsync(() => api.operation<unknown>(PLATFORM, 'provider-failures'), []);
-  const [replay, setReplay] = useState<{ type: 'webhook' | 'notification'; id: string }>();
+  const [replayOpen, setReplayOpen] = useState<'webhook' | 'notification'>();
+  const [replayId, setReplayId] = useState('');
   const [callbackOpen, setCallbackOpen] = useState(false);
+  const [endpointUrl, setEndpointUrl] = useState('');
+  const [eventTypes, setEventTypes] = useState('ORDER_UPDATED');
   const [error, setError] = useState('');
+  const partnerOptions = asRecords(partners.data);
   return (
     <Page
       eyebrow="Pepsa Order"
@@ -912,13 +1613,22 @@ export function OrderEventsPage() {
     >
       <div className="filter-bar">
         <label>
-          Partner ID
-          <input
+          Partner
+          <select
             aria-label="Partner ID for events"
             value={partnerId}
             onChange={(event) => setPartnerId(event.target.value)}
-            placeholder="Required for events and audits"
-          />
+          >
+            <option value="">Select partner</option>
+            {partnerOptions.map((row) => {
+              const id = pickString(row, 'partnerId', 'id') ?? '';
+              return (
+                <option key={id} value={id}>
+                  {pickString(row, 'name') ?? id} ({pickString(row, 'apiId') ?? id})
+                </option>
+              );
+            })}
+          </select>
         </label>
       </div>
       <h2>Provider failures</h2>
@@ -927,67 +1637,69 @@ export function OrderEventsPage() {
       ) : failures.error ? (
         <ErrorState error={failures.error} retry={failures.reload} />
       ) : (
-        <pre className="code-block">{JSON.stringify(failures.data ?? [], null, 2)}</pre>
+        <EventTable rows={asRecords(failures.data)} label="Provider failures" />
       )}
       <h2 className="section-title">Events</h2>
       {!partnerId.trim() ? (
-        <EmptyState title="Partner required" description="Enter a partner ID to list events." />
+        <EmptyState title="Partner required" description="Select a partner to list events." />
       ) : events.loading ? (
         <LoadingState />
       ) : events.error ? (
         <ErrorState error={events.error} retry={events.reload} />
       ) : (
-        <pre className="code-block">{JSON.stringify(events.data ?? [], null, 2)}</pre>
+        <EventTable rows={asRecords(events.data)} label="Events" />
       )}
       <h2 className="section-title">Audits</h2>
       {!partnerId.trim() ? (
-        <EmptyState title="Partner required" description="Enter a partner ID to list audits." />
+        <EmptyState title="Partner required" description="Select a partner to list audits." />
       ) : audits.loading ? (
         <LoadingState />
       ) : audits.error ? (
         <ErrorState error={audits.error} retry={audits.reload} />
       ) : (
-        <pre className="code-block">{JSON.stringify(audits.data ?? [], null, 2)}</pre>
+        <EventTable rows={asRecords(audits.data)} label="Audits" />
       )}
       {auth.can('order.events.operate') ? (
         <div className="filter-bar">
-          <button
-            className="button secondary"
-            onClick={() => setReplay({ type: 'webhook', id: window.prompt('Webhook delivery ID') ?? '' })}
-          >
+          <button className="button secondary" onClick={() => setReplayOpen('webhook')}>
             Replay webhook
           </button>
-          <button
-            className="button secondary"
-            onClick={() =>
-              setReplay({ type: 'notification', id: window.prompt('Notification delivery ID') ?? '' })
-            }
-          >
+          <button className="button secondary" onClick={() => setReplayOpen('notification')}>
             Replay notification
           </button>
         </div>
       ) : null}
-      {replay?.id ? (
+      {replayOpen ? (
         <ReasonModal
-          title={`Replay ${replay.type}`}
-          description={`Replay delivery ${replay.id}.`}
+          title={`Replay ${replayOpen}`}
+          description={`Replay a ${replayOpen} delivery by ID.`}
           confirmLabel="Replay"
           error={error}
-          onClose={() => setReplay(undefined)}
+          onClose={() => setReplayOpen(undefined)}
           onSubmit={async (reason) => {
             try {
               await api.mutate(
                 PLATFORM,
-                replay.type === 'webhook' ? 'webhook-replay' : 'notification-replay',
+                replayOpen === 'webhook' ? 'webhook-replay' : 'notification-replay',
                 reason,
-                { id: replay.id },
+                { id: replayId.trim() },
               );
-              setReplay(undefined);
+              setReplayOpen(undefined);
+              setReplayId('');
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Replay failed');
             }
           }}
-        />
+        >
+          <label>
+            Delivery ID
+            <input
+              aria-label="Delivery ID"
+              value={replayId}
+              onChange={(event) => setReplayId(event.target.value)}
+            />
+          </label>
+        </ReasonModal>
       ) : null}
       {callbackOpen ? (
         <ReasonModal
@@ -998,13 +1710,46 @@ export function OrderEventsPage() {
           onClose={() => setCallbackOpen(false)}
           onSubmit={async (reason) => {
             try {
-              await api.mutate(PLATFORM, 'bas-callbacks-provision', reason, {});
+              await api.mutate(PLATFORM, 'bas-callbacks-provision', reason, {
+                partnerId: partnerId.trim(),
+                endpointUrl: endpointUrl.trim(),
+                eventTypes: eventTypes
+                  .split(/[\s,]+/)
+                  .map((entry) => entry.trim())
+                  .filter(Boolean),
+              });
               setCallbackOpen(false);
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Provision failed');
             }
           }}
-        />
+        >
+          <label>
+            Partner ID
+            <input
+              aria-label="BAS callback partner ID"
+              value={partnerId}
+              onChange={(event) => setPartnerId(event.target.value)}
+            />
+          </label>
+          <label>
+            Endpoint URL
+            <input
+              aria-label="BAS callback endpoint"
+              value={endpointUrl}
+              onChange={(event) => setEndpointUrl(event.target.value)}
+              placeholder="https://..."
+            />
+          </label>
+          <label>
+            Event types
+            <input
+              aria-label="BAS callback event types"
+              value={eventTypes}
+              onChange={(event) => setEventTypes(event.target.value)}
+            />
+          </label>
+        </ReasonModal>
       ) : null}
     </Page>
   );
@@ -1018,6 +1763,10 @@ export function OrderIntegrationsPage() {
     operation: 'integrations-upsert' | 'integrations-disable' | 'integrations-rotate';
     id?: string;
   }>();
+  const [platformKey, setPlatformKey] = useState('business-as-a-service');
+  const [environment, setEnvironment] = useState('production');
+  const [paymentAuthority, setPaymentAuthority] = useState('platform-owned');
+  const [status, setStatus] = useState('DISABLED');
   const [error, setError] = useState('');
   const rows = asRecords(list.data);
   return (
@@ -1068,7 +1817,7 @@ export function OrderIntegrationsPage() {
                     <td>
                       <code>{id}</code>
                     </td>
-                    <td>{display(item.name ?? item.key ?? item.type)}</td>
+                    <td>{scalar(item.name ?? item.key ?? item.platformKey ?? item.type)}</td>
                     <td>
                       <StatusBadge value={String(item.status ?? item.state ?? 'UNKNOWN')} />
                     </td>
@@ -1112,7 +1861,17 @@ export function OrderIntegrationsPage() {
           onClose={() => setAction(undefined)}
           onSubmit={async (reason) => {
             try {
-              const payload = action.id ? { id: action.id } : { name: 'integration' };
+              const payload =
+                action.operation === 'integrations-upsert'
+                  ? {
+                      platformKey,
+                      environment,
+                      paymentAuthority,
+                      status,
+                    }
+                  : action.id
+                    ? { id: action.id }
+                    : {};
               if (action.operation === 'integrations-rotate') {
                 const outcome = await executeCriticalOperation({
                   platformKey: PLATFORM,
@@ -1135,7 +1894,44 @@ export function OrderIntegrationsPage() {
               setError(cause instanceof Error ? cause.message : 'Mutation failed');
             }
           }}
-        />
+        >
+          {action.operation === 'integrations-upsert' ? (
+            <>
+              <label>
+                Platform key
+                <input
+                  aria-label="Integration platform key"
+                  value={platformKey}
+                  onChange={(event) => setPlatformKey(event.target.value)}
+                />
+              </label>
+              <label>
+                Environment
+                <input
+                  aria-label="Integration environment"
+                  value={environment}
+                  onChange={(event) => setEnvironment(event.target.value)}
+                />
+              </label>
+              <label>
+                Payment authority
+                <input
+                  aria-label="Payment authority"
+                  value={paymentAuthority}
+                  onChange={(event) => setPaymentAuthority(event.target.value)}
+                />
+              </label>
+              <label>
+                Status
+                <input
+                  aria-label="Integration status"
+                  value={status}
+                  onChange={(event) => setStatus(event.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
+        </ReasonModal>
       ) : null}
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
     </Page>

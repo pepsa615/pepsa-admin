@@ -12,8 +12,7 @@ function canonicalJson(value: unknown): string {
 }
 
 export type CriticalOperationResult =
-  | { status: 'executed'; result: unknown }
-  | { status: 'requested'; approvalId: string };
+  { status: 'executed'; result: unknown } | { status: 'requested'; approvalId: string };
 
 /**
  * Dual-control path for critical platform operations.

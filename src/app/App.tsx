@@ -279,7 +279,7 @@ export function App() {
           <Route
             path="p/pepsa-payment/platforms"
             element={
-              <PermissionRoute permission="payment.platforms.write">
+              <PermissionRoute permission="payment.platforms.read">
                 <PaymentPlatformsPage />
               </PermissionRoute>
             }

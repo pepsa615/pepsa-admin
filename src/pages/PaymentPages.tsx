@@ -1,90 +1,23 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../app/AuthContext.js';
 import { Page } from '../components/Page.js';
 import { StepUpDialog } from '../components/StepUpDialog.js';
+import {
+  DetailPanel,
+  ReasonModal,
+  asRecords,
+  formatMaybeDate,
+  pickString,
+  scalar,
+  type JsonRecord,
+} from '../components/OpsUi.js';
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from '../components/States.js';
 import { api } from '../core/api.js';
 import { criticalRequestMessage, executeCriticalOperation } from '../core/criticalOperation.js';
 import { useAsync } from '../core/useAsync.js';
 
 const PLATFORM = 'pepsa-payment';
-
-type JsonRecord = Record<string, unknown>;
-
-function asRecords(value: unknown): JsonRecord[] {
-  if (Array.isArray(value)) return value as JsonRecord[];
-  if (value && typeof value === 'object') {
-    const record = value as JsonRecord;
-    for (const key of ['items', 'data', 'results', 'rows', 'records']) {
-      if (Array.isArray(record[key])) return record[key] as JsonRecord[];
-    }
-  }
-  return [];
-}
-
-function display(value: unknown) {
-  if (value == null) return '—';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')
-    return String(value);
-  return JSON.stringify(value);
-}
-
-function ReasonModal(props: {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  busy?: boolean;
-  error?: string;
-  children?: ReactNode;
-  onClose: () => void;
-  onSubmit: (reason: string) => Promise<void>;
-}) {
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={props.onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="payment-reason-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <h2 id="payment-reason-title">{props.title}</h2>
-        </header>
-        <p>{props.description}</p>
-        {props.children}
-        <label>
-          Business reason
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            rows={3}
-            placeholder="Explain why this change is required"
-          />
-        </label>
-        {props.error ? <p className="form-error">{props.error}</p> : null}
-        <footer>
-          <button className="button secondary" type="button" onClick={props.onClose}>
-            Cancel
-          </button>
-          <button
-            className="button primary"
-            type="button"
-            disabled={submitting || props.busy || reason.trim().length < 8}
-            onClick={() => {
-              setSubmitting(true);
-              void props.onSubmit(reason.trim()).finally(() => setSubmitting(false));
-            }}
-          >
-            {props.confirmLabel}
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
-}
 
 export function PaymentOverviewPage() {
   const sva = useAsync(() => api.operation<unknown>(PLATFORM, 'sva-provisioning-list'), []);
@@ -127,14 +60,16 @@ export function PaymentOverviewPage() {
           <article className="metric">
             <span>SVA sample</span>
             <strong>
-              {display(svaRows[0]?.status ?? svaRows[0]?.state ?? (svaRows.length ? 'loaded' : 'empty'))}
+              {scalar(
+                svaRows[0]?.status ?? svaRows[0]?.state ?? (svaRows.length ? 'loaded' : 'empty'),
+              )}
             </strong>
             <small>First row status</small>
           </article>
           <article className="metric">
             <span>Checkout sample</span>
             <strong>
-              {display(
+              {scalar(
                 checkoutRows[0]?.status ??
                   checkoutRows[0]?.state ??
                   (checkoutRows.length ? 'loaded' : 'empty'),
@@ -150,25 +85,42 @@ export function PaymentOverviewPage() {
 
 export function PaymentPlatformsPage() {
   const auth = useAuth();
-  const [platformId, setPlatformId] = useState('');
+  const navigate = useNavigate();
+  const list = useAsync(() => api.operation<unknown>(PLATFORM, 'platforms-list'), []);
+  const [selectedId, setSelectedId] = useState('');
   const [onboardName, setOnboardName] = useState('');
-  const [statusValue, setStatusValue] = useState('SUSPENDED');
+  const [statusValue, setStatusValue] = useState('suspended');
   const [action, setAction] = useState<'onboard' | 'status' | 'rotate'>();
   const [stepUp, setStepUp] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [oneTimeKey, setOneTimeKey] = useState('');
+  const rows = asRecords(list.data);
+
   return (
     <Page
       eyebrow="Pepsa Payment"
       title="Platforms"
-      description="Onboard platforms, change status, and rotate API keys. Keys are shown once."
+      description="Browse payment platforms, onboard tenants, change status, and rotate API keys."
       action={
-        auth.can('payment.platforms.keys.rotate') ? (
-          <button className="button secondary" onClick={() => setStepUp(true)}>
-            Verify MFA
-          </button>
-        ) : undefined
+        <div className="inline-actions">
+          {auth.can('payment.platforms.keys.rotate') || auth.can('payment.platforms.status') ? (
+            <button className="button secondary" onClick={() => setStepUp(true)}>
+              Verify MFA
+            </button>
+          ) : null}
+          {auth.can('payment.platforms.write') ? (
+            <button
+              className="button primary"
+              onClick={() => {
+                setError('');
+                setAction('onboard');
+              }}
+            >
+              Onboard platform
+            </button>
+          ) : null}
+        </div>
       }
     >
       {message ? <p className="banner success">{message}</p> : null}
@@ -177,52 +129,93 @@ export function PaymentPlatformsPage() {
           One-time API key (copy now): <code>{oneTimeKey}</code>
         </p>
       ) : null}
-      <div className="filter-bar">
-        <label>
-          Platform ID
-          <input
-            aria-label="Platform ID"
-            value={platformId}
-            onChange={(event) => setPlatformId(event.target.value)}
-            placeholder="Platform UUID"
-          />
-        </label>
-        {auth.can('payment.platforms.write') ? (
-          <button
-            className="button primary"
-            onClick={() => {
-              setError('');
-              setAction('onboard');
-            }}
-          >
-            Onboard platform
-          </button>
-        ) : null}
-        {auth.can('payment.platforms.status') ? (
-          <button
-            className="button secondary"
-            disabled={!platformId.trim()}
-            onClick={() => {
-              setError('');
-              setAction('status');
-            }}
-          >
-            Update status
-          </button>
-        ) : null}
-        {auth.can('payment.platforms.keys.rotate') ? (
-          <button
-            className="button danger"
-            disabled={!platformId.trim()}
-            onClick={() => {
-              setError('');
-              setAction('rotate');
-            }}
-          >
-            Rotate API key
-          </button>
-        ) : null}
-      </div>
+      {list.loading ? (
+        <LoadingState />
+      ) : list.error ? (
+        <ErrorState error={list.error} retry={list.reload} />
+      ) : !rows.length ? (
+        <EmptyState
+          title="No payment platforms"
+          description="Onboard a platform to create the first tenant. Keys are shown once on create or rotate."
+        />
+      ) : (
+        <div className="table-panel">
+          <table aria-label="Payment platforms">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Platform ID</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const id = pickString(row, 'platform_id', 'platformId', 'id') ?? '';
+                const name = pickString(row, 'name') ?? '—';
+                const status = pickString(row, 'status') ?? 'unknown';
+                return (
+                  <tr key={id || name}>
+                    <td>{name}</td>
+                    <td>
+                      <code>{id || '—'}</code>
+                    </td>
+                    <td>
+                      <StatusBadge value={status} />
+                    </td>
+                    <td>{formatMaybeDate(row.created_at ?? row.createdAt)}</td>
+                    <td>
+                      <div className="inline-actions">
+                        <button
+                          className="text-link"
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              `/p/pepsa-payment/settings?platformId=${encodeURIComponent(id)}`,
+                            )
+                          }
+                          disabled={!id}
+                        >
+                          Settings
+                        </button>
+                        {auth.can('payment.platforms.status') ? (
+                          <button
+                            className="text-link"
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(id);
+                              setError('');
+                              setAction('status');
+                            }}
+                            disabled={!id}
+                          >
+                            Status
+                          </button>
+                        ) : null}
+                        {auth.can('payment.platforms.keys.rotate') ? (
+                          <button
+                            className="text-link"
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(id);
+                              setError('');
+                              setAction('rotate');
+                            }}
+                            disabled={!id}
+                          >
+                            Rotate key
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       {action === 'onboard' ? (
         <ReasonModal
           title="Onboard platform"
@@ -240,6 +233,7 @@ export function PaymentPlatformsPage() {
               setAction(undefined);
               setOnboardName('');
               setMessage('Platform onboard submitted.');
+              await list.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Onboard failed');
             }
@@ -259,21 +253,17 @@ export function PaymentPlatformsPage() {
       {action === 'status' ? (
         <ReasonModal
           title="Update platform status"
-          description={`Set status for platform ${platformId}.`}
+          description={`Set status for platform ${selectedId}.`}
           confirmLabel="Update status"
           error={error}
           onClose={() => setAction(undefined)}
           onSubmit={async (reason) => {
             try {
-              const payload = {
-                platformId: platformId.trim(),
-                status: statusValue,
-              };
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'platforms-status',
                 reason,
-                payload,
+                payload: { platformId: selectedId, status: statusValue },
                 requesterId: auth.session?.user.id,
               });
               if (outcome.status === 'requested') {
@@ -283,6 +273,7 @@ export function PaymentPlatformsPage() {
               }
               setAction(undefined);
               setMessage('Platform status update submitted.');
+              await list.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Status update failed');
             }
@@ -295,9 +286,9 @@ export function PaymentPlatformsPage() {
               value={statusValue}
               onChange={(event) => setStatusValue(event.target.value)}
             >
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="SUSPENDED">SUSPENDED</option>
-              <option value="REVOKED">REVOKED</option>
+              <option value="active">active</option>
+              <option value="suspended">suspended</option>
+              <option value="revoked">revoked</option>
             </select>
           </label>
         </ReasonModal>
@@ -305,18 +296,17 @@ export function PaymentPlatformsPage() {
       {action === 'rotate' ? (
         <ReasonModal
           title="Rotate platform API key"
-          description={`Rotate the API key for ${platformId}. The previous key is invalidated. Dual approval required.`}
+          description={`Rotate the API key for ${selectedId}. The previous key is invalidated. Dual approval required.`}
           confirmLabel="Rotate key"
           error={error}
           onClose={() => setAction(undefined)}
           onSubmit={async (reason) => {
             try {
-              const payload = { platformId: platformId.trim() };
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'platforms-rotate-key',
                 reason,
-                payload,
+                payload: { platformId: selectedId },
                 requesterId: auth.session?.user.id,
               });
               if (outcome.status === 'requested') {
@@ -329,6 +319,7 @@ export function PaymentPlatformsPage() {
               if (typeof key === 'string') setOneTimeKey(key);
               setAction(undefined);
               setMessage('API key rotation submitted.');
+              await list.reload();
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : 'Rotate failed');
             }
@@ -340,10 +331,151 @@ export function PaymentPlatformsPage() {
   );
 }
 
+function SettingsFormFields(props: {
+  kind: 'transfer' | 'vas' | 'settlement';
+  values: Record<string, string | boolean>;
+  onChange: (key: string, value: string | boolean) => void;
+}) {
+  if (props.kind === 'transfer')
+    return (
+      <>
+        {(
+          [
+            ['internal_transfer_fee', 'Internal transfer fee'],
+            ['external_transfer_fee', 'External transfer fee'],
+            ['stamp_duty_amount', 'Stamp duty amount'],
+            ['stamp_duty_minimum_threshold', 'Stamp duty minimum'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key}>
+            {label}
+            <input
+              aria-label={label}
+              value={String(props.values[key] ?? '')}
+              onChange={(event) => props.onChange(key, event.target.value)}
+            />
+          </label>
+        ))}
+        <label>
+          Active
+          <select
+            aria-label="Transfer settings active"
+            value={props.values.active ? 'true' : 'false'}
+            onChange={(event) => props.onChange('active', event.target.value === 'true')}
+          >
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+      </>
+    );
+  if (props.kind === 'vas')
+    return (
+      <>
+        {(
+          [
+            ['airtime_fee', 'Airtime fee'],
+            ['data_fee', 'Data fee'],
+            ['electricity_fee', 'Electricity fee'],
+            ['cable_tv_fee', 'Cable TV fee'],
+            ['other_fee', 'Other fee'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key}>
+            {label}
+            <input
+              aria-label={label}
+              value={String(props.values[key] ?? '')}
+              onChange={(event) => props.onChange(key, event.target.value)}
+            />
+          </label>
+        ))}
+        <label>
+          Active
+          <select
+            aria-label="VAS settings active"
+            value={props.values.active ? 'true' : 'false'}
+            onChange={(event) => props.onChange('active', event.target.value === 'true')}
+          >
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </label>
+      </>
+    );
+  return (
+    <>
+      <label>
+        Escrow hold hours
+        <input
+          aria-label="Escrow hold hours"
+          type="number"
+          min={1}
+          max={168}
+          value={String(props.values.escrow_hold_hours ?? '')}
+          onChange={(event) => props.onChange('escrow_hold_hours', event.target.value)}
+        />
+      </label>
+      <label>
+        Checkout expiry hours
+        <input
+          aria-label="Checkout expiry hours"
+          type="number"
+          min={1}
+          max={24}
+          value={String(props.values.checkout_expiry_hours ?? '')}
+          onChange={(event) => props.onChange('checkout_expiry_hours', event.target.value)}
+        />
+      </label>
+      <label>
+        Active
+        <select
+          aria-label="Settlement settings active"
+          value={props.values.active ? 'true' : 'false'}
+          onChange={(event) => props.onChange('active', event.target.value === 'true')}
+        >
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </label>
+    </>
+  );
+}
+
+function settingsFromRecord(
+  kind: 'transfer' | 'vas' | 'settlement',
+  data: JsonRecord | undefined,
+): Record<string, string | boolean> {
+  if (kind === 'transfer')
+    return {
+      internal_transfer_fee: String(data?.internal_transfer_fee ?? '0.00'),
+      external_transfer_fee: String(data?.external_transfer_fee ?? '0.00'),
+      stamp_duty_amount: String(data?.stamp_duty_amount ?? '0.00'),
+      stamp_duty_minimum_threshold: String(data?.stamp_duty_minimum_threshold ?? '0.00'),
+      active: data?.active !== false,
+    };
+  if (kind === 'vas')
+    return {
+      airtime_fee: String(data?.airtime_fee ?? '0.00'),
+      data_fee: String(data?.data_fee ?? '0.00'),
+      electricity_fee: String(data?.electricity_fee ?? '0.00'),
+      cable_tv_fee: String(data?.cable_tv_fee ?? '0.00'),
+      other_fee: String(data?.other_fee ?? '0.00'),
+      active: data?.active !== false,
+    };
+  return {
+    escrow_hold_hours: String(data?.escrow_hold_hours ?? 24),
+    checkout_expiry_hours: String(data?.checkout_expiry_hours ?? 1),
+    active: data?.active !== false,
+  };
+}
+
 export function PaymentSettingsPage() {
   const auth = useAuth();
-  const [platformId, setPlatformId] = useState('');
-  const [loadedId, setLoadedId] = useState('');
+  const [searchParams] = useSearchParams();
+  const platforms = useAsync(() => api.operation<unknown>(PLATFORM, 'platforms-list'), []);
+  const [platformId, setPlatformId] = useState(searchParams.get('platformId') ?? '');
+  const [loadedId, setLoadedId] = useState(searchParams.get('platformId') ?? '');
   const transfer = useAsync(
     () =>
       loadedId
@@ -378,9 +510,19 @@ export function PaymentSettingsPage() {
     [loadedId],
   );
   const [patch, setPatch] = useState<'transfer' | 'vas' | 'settlement'>();
+  const [draft, setDraft] = useState<Record<string, string | boolean>>({});
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [stepUp, setStepUp] = useState(false);
+  const platformOptions = asRecords(platforms.data);
+
+  useEffect(() => {
+    if (!patch) return;
+    const source =
+      patch === 'transfer' ? transfer.data : patch === 'vas' ? vas.data : settlement.data;
+    setDraft(settingsFromRecord(patch, source));
+  }, [patch, transfer.data, vas.data, settlement.data]);
+
   return (
     <Page
       eyebrow="Pepsa Payment"
@@ -395,7 +537,26 @@ export function PaymentSettingsPage() {
       {message ? <p className="banner success">{message}</p> : null}
       <div className="filter-bar">
         <label>
-          Platform ID
+          Platform
+          <select
+            aria-label="Settings platform"
+            value={platformId}
+            onChange={(event) => setPlatformId(event.target.value)}
+          >
+            <option value="">Select platform</option>
+            {platformOptions.map((row) => {
+              const id = pickString(row, 'platform_id', 'platformId', 'id') ?? '';
+              const name = pickString(row, 'name') ?? id;
+              return (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+        <label>
+          Or platform ID
           <input
             aria-label="Settings platform ID"
             value={platformId}
@@ -417,18 +578,13 @@ export function PaymentSettingsPage() {
       {!loadedId ? (
         <EmptyState
           title="Select a platform"
-          description="Enter a platform ID and load transfer, VAS, and settlement settings."
+          description="Choose a platform from the directory or paste an ID, then load settings."
         />
       ) : transfer.loading || vas.loading || settlement.loading ? (
         <LoadingState />
       ) : transfer.error || vas.error || settlement.error ? (
         <ErrorState
-          error={
-            transfer.error ||
-            vas.error ||
-            settlement.error ||
-            new Error('Load failed')
-          }
+          error={transfer.error || vas.error || settlement.error || new Error('Load failed')}
           retry={() => {
             void transfer.reload();
             void vas.reload();
@@ -438,24 +594,71 @@ export function PaymentSettingsPage() {
       ) : (
         <>
           <h2 className="section-title">Transfer</h2>
-          <pre className="code-block">{JSON.stringify(transfer.data ?? {}, null, 2)}</pre>
+          <DetailPanel
+            entries={[
+              {
+                label: 'Internal fee',
+                value: scalar(transfer.data?.internal_transfer_fee),
+              },
+              {
+                label: 'External fee',
+                value: scalar(transfer.data?.external_transfer_fee),
+              },
+              { label: 'Stamp duty', value: scalar(transfer.data?.stamp_duty_amount) },
+              {
+                label: 'Stamp duty minimum',
+                value: scalar(transfer.data?.stamp_duty_minimum_threshold),
+              },
+              {
+                label: 'Active',
+                value: <StatusBadge value={String(transfer.data?.active ?? false)} />,
+              },
+            ]}
+          />
           {auth.can('payment.settings.transfer') ? (
             <button className="button secondary" onClick={() => setPatch('transfer')}>
-              Patch transfer settings
+              Edit transfer settings
             </button>
           ) : null}
           <h2 className="section-title">VAS</h2>
-          <pre className="code-block">{JSON.stringify(vas.data ?? {}, null, 2)}</pre>
+          <DetailPanel
+            entries={[
+              { label: 'Airtime fee', value: scalar(vas.data?.airtime_fee) },
+              { label: 'Data fee', value: scalar(vas.data?.data_fee) },
+              { label: 'Electricity fee', value: scalar(vas.data?.electricity_fee) },
+              { label: 'Cable TV fee', value: scalar(vas.data?.cable_tv_fee) },
+              { label: 'Other fee', value: scalar(vas.data?.other_fee) },
+              {
+                label: 'Active',
+                value: <StatusBadge value={String(vas.data?.active ?? false)} />,
+              },
+            ]}
+          />
           {auth.can('payment.settings.vas') ? (
             <button className="button secondary" onClick={() => setPatch('vas')}>
-              Patch VAS settings
+              Edit VAS settings
             </button>
           ) : null}
           <h2 className="section-title">Settlement</h2>
-          <pre className="code-block">{JSON.stringify(settlement.data ?? {}, null, 2)}</pre>
+          <DetailPanel
+            entries={[
+              {
+                label: 'Escrow hold hours',
+                value: scalar(settlement.data?.escrow_hold_hours),
+              },
+              {
+                label: 'Checkout expiry hours',
+                value: scalar(settlement.data?.checkout_expiry_hours),
+              },
+              {
+                label: 'Active',
+                value: <StatusBadge value={String(settlement.data?.active ?? false)} />,
+              },
+            ]}
+          />
           {auth.can('payment.settings.settlement') ? (
             <button className="button secondary" onClick={() => setPatch('settlement')}>
-              Patch settlement settings
+              Edit settlement settings
             </button>
           ) : null}
         </>
@@ -463,9 +666,9 @@ export function PaymentSettingsPage() {
       {error ? <p className="form-error">{error}</p> : null}
       {patch ? (
         <ReasonModal
-          title={`Patch ${patch} settings`}
-          description="Attributed settings mutations require a business reason. Empty patch body refreshes audit trail only when destination allows."
-          confirmLabel="Submit patch"
+          title={`Update ${patch} settings`}
+          description="Attributed settings mutations require a business reason."
+          confirmLabel="Submit update"
           error={error}
           onClose={() => setPatch(undefined)}
           onSubmit={async (reason) => {
@@ -476,17 +679,28 @@ export function PaymentSettingsPage() {
                   : patch === 'vas'
                     ? 'vas-settings-patch'
                     : 'settlement-settings-patch';
-              await api.mutate(PLATFORM, operation, reason, { platformId: loadedId });
+              const payload: JsonRecord = { platformId: loadedId, ...draft };
+              if (patch === 'settlement') {
+                payload.escrow_hold_hours = Number(draft.escrow_hold_hours);
+                payload.checkout_expiry_hours = Number(draft.checkout_expiry_hours);
+              }
+              await api.mutate(PLATFORM, operation, reason, payload);
               setPatch(undefined);
-              setMessage(`${patch} settings patch submitted.`);
+              setMessage(`${patch} settings update submitted.`);
               void transfer.reload();
               void vas.reload();
               void settlement.reload();
             } catch (cause) {
-              setError(cause instanceof Error ? cause.message : 'Patch failed');
+              setError(cause instanceof Error ? cause.message : 'Update failed');
             }
           }}
-        />
+        >
+          <SettingsFormFields
+            kind={patch}
+            values={draft}
+            onChange={(key, value) => setDraft((current) => ({ ...current, [key]: value }))}
+          />
+        </ReasonModal>
       ) : null}
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
     </Page>
@@ -517,7 +731,13 @@ function ProvisioningTable(props: {
         <tbody>
           {props.rows.map((row, index) => {
             const id = String(
-              row[props.idKey] ?? row.id ?? row.userId ?? row.checkoutId ?? index,
+              row[props.idKey] ??
+                row.user_id ??
+                row.checkout_id ??
+                row.id ??
+                row.userId ??
+                row.checkoutId ??
+                index,
             );
             return (
               <tr key={id}>
@@ -527,7 +747,9 @@ function ProvisioningTable(props: {
                 <td>
                   <StatusBadge value={String(row.status ?? row.state ?? 'UNKNOWN')} />
                 </td>
-                <td>{display(row.providerStatus ?? row.note ?? row.type ?? '—')}</td>
+                <td>
+                  {scalar(row.providerStatus ?? row.last_error ?? row.note ?? row.type ?? '—')}
+                </td>
                 <td>
                   {props.canReconcile ? (
                     <button className="text-link" onClick={() => props.onReconcile(id)}>
@@ -549,6 +771,9 @@ export function PaymentSvaPage() {
   const list = useAsync(() => api.operation<unknown>(PLATFORM, 'sva-provisioning-list'), []);
   const [userId, setUserId] = useState('');
   const [action, setAction] = useState('retry');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [bankName, setBankName] = useState('');
   const [open, setOpen] = useState(false);
   const [stepUp, setStepUp] = useState(false);
   const [error, setError] = useState('');
@@ -593,10 +818,15 @@ export function PaymentSvaPage() {
           onClose={() => setOpen(false)}
           onSubmit={async (reason) => {
             try {
-              const payload = {
+              const payload: JsonRecord = {
                 userId: userId.trim(),
                 action,
               };
+              if (action === 'activate') {
+                payload.account_number = accountNumber.trim();
+                payload.account_name = accountName.trim();
+                payload.bank_name = bankName.trim();
+              }
               const outcome = await executeCriticalOperation({
                 platformKey: PLATFORM,
                 operation: 'sva-provisioning-reconcile',
@@ -629,6 +859,34 @@ export function PaymentSvaPage() {
               <option value="mark_failed">mark_failed</option>
             </select>
           </label>
+          {action === 'activate' ? (
+            <>
+              <label>
+                Account number
+                <input
+                  aria-label="SVA account number"
+                  value={accountNumber}
+                  onChange={(event) => setAccountNumber(event.target.value)}
+                />
+              </label>
+              <label>
+                Account name
+                <input
+                  aria-label="SVA account name"
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
+                />
+              </label>
+              <label>
+                Bank name
+                <input
+                  aria-label="SVA bank name"
+                  value={bankName}
+                  onChange={(event) => setBankName(event.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
         </ReasonModal>
       ) : null}
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
@@ -784,24 +1042,41 @@ export function PaymentKycPage() {
           <button className="button secondary" onClick={() => setStepUp(true)}>
             Verify MFA
           </button>
-          <button
-            className="button danger"
-            onClick={() => {
-              setError('');
-              setOpen(true);
-            }}
-          >
-            Rotate encryption
-          </button>
+          {auth.can('payment.kyc.encryption.rotate') ? (
+            <button
+              className="button danger"
+              onClick={() => {
+                setError('');
+                setOpen(true);
+              }}
+            >
+              Rotate encryption
+            </button>
+          ) : null}
         </div>
       }
     >
       {message ? <p className="banner success">{message}</p> : null}
-      {result ? <pre className="code-block">{JSON.stringify(result, null, 2)}</pre> : null}
-      <EmptyState
-        title="High-risk control"
-        description="Re-encrypts NIN/BVN under the active KYC encryption key. Verify MFA before rotating."
-      />
+      {result ? (
+        <DetailPanel
+          title="Last rotation"
+          entries={[
+            {
+              label: 'Active key',
+              value: scalar(result.active_key_id ?? result.activeKeyId),
+            },
+            {
+              label: 'Profiles rotated',
+              value: scalar(result.profiles_rotated ?? result.profilesRotated),
+            },
+          ]}
+        />
+      ) : (
+        <EmptyState
+          title="High-risk control"
+          description="Re-encrypts NIN/BVN under the active KYC encryption key. Verify MFA before rotating."
+        />
+      )}
       {open ? (
         <ReasonModal
           title="Rotate KYC encryption"

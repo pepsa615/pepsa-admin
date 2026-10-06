@@ -33,16 +33,11 @@ const platformNavigation = [
 ] as const;
 const orderNavigation = [
   ['/p/pepsa-order/overview', 'Order overview', 'order.fleet.read', 'fleet-health'],
-  ['/p/pepsa-order/partners', 'Partners', 'order.partners.read', 'catalog-read'],
+  ['/p/pepsa-order/partners', 'Partners', 'order.partners.read', 'partners-list'],
   ['/p/pepsa-order/fleet', 'Fleet', 'order.fleet.read', 'fleet-riders'],
   ['/p/pepsa-order/processing', 'Processing', 'order.processing.read', 'processing-pool'],
   ['/p/pepsa-order/dispatch', 'Dispatch', 'order.dispatch.read', 'dispatch-tasks'],
-  [
-    '/p/pepsa-order/policies',
-    'Policies',
-    'order.operations.policies.read',
-    'policies-active',
-  ],
+  ['/p/pepsa-order/policies', 'Policies', 'order.operations.policies.read', 'policies-active'],
   ['/p/pepsa-order/events', 'Events', 'order.events.read', 'events-list'],
   ['/p/pepsa-order/integrations', 'Integrations', 'order.integrations.read', 'integrations-list'],
 ] as const;
@@ -53,13 +48,8 @@ const paymentNavigation = [
     'payment.sva.provisioning.read',
     'sva-provisioning-list',
   ],
-  ['/p/pepsa-payment/platforms', 'Payment platforms', 'payment.platforms.write', 'platforms-onboard'],
-  [
-    '/p/pepsa-payment/settings',
-    'Settings',
-    'payment.settings.transfer',
-    'transfer-settings-get',
-  ],
+  ['/p/pepsa-payment/platforms', 'Payment platforms', 'payment.platforms.read', 'platforms-list'],
+  ['/p/pepsa-payment/settings', 'Settings', 'payment.settings.transfer', 'transfer-settings-get'],
   [
     '/p/pepsa-payment/sva',
     'SVA provisioning',
@@ -195,7 +185,10 @@ export function AppShell() {
             </strong>
           </div>
           <div className="topbar-actions">
-            <span className="environment" title="Staging vs production isolation is by deploy host, not an in-app switch">
+            <span
+              className="environment"
+              title="Staging vs production isolation is by deploy host, not an in-app switch"
+            >
               {selectedPlatform ? selectedPlatform.name : 'Control plane'}
             </span>
             <NotificationsMenu />
