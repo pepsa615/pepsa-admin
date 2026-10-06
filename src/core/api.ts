@@ -275,6 +275,15 @@ export const api = {
     id: string,
     input: { key: string; name: string; endpointReference?: string; reason: string },
   ) => request(`/platforms/${id}/environments`, { method: 'POST', body: JSON.stringify(input) }),
+  setPlatformEnvironmentStatus: (
+    id: string,
+    environmentKey: string,
+    input: { status: string; reason: string },
+  ) =>
+    request(`/platforms/${id}/environments/${environmentKey}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
   operation: <T>(platform: string, operation: string, query = '') =>
     request<T>(`/operations/${platform}/${operation}${query}`),
   mutate: async <T>(

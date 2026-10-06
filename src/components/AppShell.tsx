@@ -95,6 +95,15 @@ export function AppShell() {
     [selectedPlatform?.key],
   );
   const supportedOperations = new Set(capabilities.data?.operations.map(({ key }) => key) ?? []);
+  const capabilitiesReady = Boolean(capabilities.data) && !capabilities.error;
+  const navVisible = (permission: string, operation: string) => {
+    if (!auth.can(permission)) return false;
+    // Soft-filter by destination capabilities only when the catalogue loaded.
+    // If the env is DISABLED or the adapter is unreachable, still show links so
+    // operators can open pages / see enablement errors instead of an empty sidebar.
+    if (!capabilitiesReady) return true;
+    return supportedOperations.has(operation);
+  };
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -131,12 +140,14 @@ export function AppShell() {
               </select>
             </>
           ) : null}
+          {selectedPlatform && capabilities.error ? (
+            <p className="nav-label" title={capabilities.error.message}>
+              Platform API unavailable — check env ACTIVE + service URLs
+            </p>
+          ) : null}
           {selectedPlatform?.key === 'business-as-a-service' &&
             platformNavigation
-              .filter(
-                ([, , permission, operation]) =>
-                  auth.can(permission) && supportedOperations.has(operation),
-              )
+              .filter(([, , permission, operation]) => navVisible(permission, operation))
               .map(([to, label]) => (
                 <NavLink key={to} to={to}>
                   {label}
@@ -144,10 +155,7 @@ export function AppShell() {
               ))}
           {selectedPlatform?.key === 'pepsa-order' &&
             orderNavigation
-              .filter(
-                ([, , permission, operation]) =>
-                  auth.can(permission) && supportedOperations.has(operation),
-              )
+              .filter(([, , permission, operation]) => navVisible(permission, operation))
               .map(([to, label]) => (
                 <NavLink key={to} to={to}>
                   {label}
@@ -155,10 +163,7 @@ export function AppShell() {
               ))}
           {selectedPlatform?.key === 'pepsa-payment' &&
             paymentNavigation
-              .filter(
-                ([, , permission, operation]) =>
-                  auth.can(permission) && supportedOperations.has(operation),
-              )
+              .filter(([, , permission, operation]) => navVisible(permission, operation))
               .map(([to, label]) => (
                 <NavLink key={to} to={to}>
                   {label}

@@ -43,6 +43,8 @@ export function PlatformsPage() {
             manage={auth.can('admin.platforms.manage')}
             edit={() => setEditing(platform)}
             rotateCredentials={() => setRotating(platform)}
+            completed={platforms.reload}
+            requestStepUp={() => setStepUp(true)}
           />
         ))}
       </div>
@@ -71,13 +73,40 @@ function PlatformCard({
   manage,
   edit,
   rotateCredentials,
+  completed,
+  requestStepUp,
 }: {
   platform: Platform;
   manage: boolean;
   edit(): void;
   rotateCredentials(): void;
+  completed(): Promise<void>;
+  requestStepUp(): void;
 }) {
-  const health = useAsync(() => api.platformHealth(platform.key), [platform.key]);
+  const production = platform.environments.find(({ key }) => key === 'production');
+  const health = useAsync(
+    () =>
+      production?.status === 'ACTIVE'
+        ? api.platformHealth(platform.key)
+        : Promise.resolve({ status: 'disabled', checkedAt: new Date().toISOString() }),
+    [platform.key, production?.status],
+  );
+  const setEnv = async (status: 'ACTIVE' | 'DISABLED') => {
+    try {
+      await api.setPlatformEnvironmentStatus(platform.id, 'production', {
+        status,
+        reason:
+          status === 'ACTIVE'
+            ? 'Enable platform UI and control-plane operations for this deploy lane'
+            : 'Disable platform control-plane access for this deploy lane',
+      });
+      await completed();
+    } catch (cause) {
+      const text = message(cause);
+      if (/step.?up|MFA|428/i.test(text)) requestStepUp();
+      window.alert(text);
+    }
+  };
   return (
     <article className="platform-card">
       <header>
@@ -98,7 +127,10 @@ function PlatformCard({
         <div>
           <dt>Deploy environment</dt>
           <dd>
-            {platform.environments.map(({ name }) => name).join(', ') || 'production'} (host-scoped)
+            {platform.environments.length
+              ? platform.environments.map(({ key, status }) => `${key}: ${status}`).join(' · ')
+              : 'missing'}{' '}
+            (host-scoped)
           </dd>
         </div>
         <div>
@@ -114,6 +146,17 @@ function PlatformCard({
           <button className="button secondary" onClick={rotateCredentials}>
             Rotate credentials
           </button>
+          {production && production.status !== 'ACTIVE' ? (
+            <button className="button primary" onClick={() => void setEnv('ACTIVE')}>
+              Enable production env
+            </button>
+          ) : null}
+          {production?.status === 'ACTIVE' &&
+          (platform.key === 'pepsa-order' || platform.key === 'pepsa-payment') ? (
+            <button className="button danger" onClick={() => void setEnv('DISABLED')}>
+              Disable production env
+            </button>
+          ) : null}
         </footer>
       )}
     </article>
