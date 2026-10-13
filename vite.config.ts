@@ -17,6 +17,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      // Deploy uses PEPSA_VITE_OUTDIR so the live dist/ is swapped atomically
+      // instead of being emptied mid-build (which makes nginx SPA-fallback HTML for JS).
+      outDir: process.env.PEPSA_VITE_OUTDIR || 'dist',
+      emptyOutDir: true,
       sourcemap: true,
     },
     test: {
