@@ -269,6 +269,7 @@ export function BusinessesPage() {
     [debouncedSearch],
   );
   const [review, setReview] = useState<Business>();
+  const [paymentTerms, setPaymentTerms] = useState<Business>();
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState(false);
@@ -351,6 +352,7 @@ export function BusinessesPage() {
                 </th>
                 <th>Business</th>
                 <th>Status</th>
+                <th>Payment</th>
                 <th>Active context</th>
                 <th>API access</th>
                 <th>Joined</th>
@@ -382,6 +384,9 @@ export function BusinessesPage() {
                   <td>
                     <StatusBadge value={business.status} />
                   </td>
+                  <td>
+                    <StatusBadge value={business.paymentMethod ?? 'INSTANT'} />
+                  </td>
                   <td>{business.environment}</td>
                   <td>
                     <StatusBadge value={business.apiAccessStatus} />
@@ -410,6 +415,21 @@ export function BusinessesPage() {
           canReview={auth.can('bas.businesses.review')}
           canManageLegalHold={auth.can('bas.assets.legal-hold')}
           setLegalHold={setLegalHold}
+          openPaymentTerms={() => {
+            setPaymentTerms(review);
+            setReview(undefined);
+            setError('');
+          }}
+        />
+      )}
+      {paymentTerms && (
+        <PaymentTermsDialog
+          business={paymentTerms}
+          close={() => setPaymentTerms(undefined)}
+          completed={async () => {
+            setPaymentTerms(undefined);
+            await result.reload();
+          }}
         />
       )}
       {bulk && (
@@ -562,6 +582,7 @@ function ReviewDialog({
   canReview,
   canManageLegalHold,
   setLegalHold,
+  openPaymentTerms,
 }: {
   business: Business;
   error: string;
@@ -570,6 +591,7 @@ function ReviewDialog({
   canReview: boolean;
   canManageLegalHold: boolean;
   setLegalHold(assetId: string, action: 'PLACE' | 'RELEASE', reason: string): Promise<void>;
+  openPaymentTerms(): void;
 }) {
   const navigate = useNavigate();
   const transitions: Record<string, string[]> = {
@@ -673,6 +695,10 @@ function ReviewDialog({
             <div>
               <dt>User-selected context</dt>
               <dd>{business.environment}</dd>
+            </div>
+            <div>
+              <dt>Payment method</dt>
+              <dd>{business.paymentMethod ?? 'INSTANT'} (prepaid default when unset)</dd>
             </div>
             <div>
               <dt>Submitted</dt>
@@ -804,6 +830,11 @@ function ReviewDialog({
           >
             View pricing
           </button>
+          {canReview && (
+            <button type="button" className="button secondary" onClick={openPaymentTerms}>
+              Payment terms
+            </button>
+          )}
           <button type="button" className="button secondary" onClick={close}>
             Close
           </button>
@@ -812,6 +843,148 @@ function ReviewDialog({
               {busy ? 'Applying…' : 'Confirm decision'}
             </button>
           )}
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function PaymentTermsDialog({
+  business,
+  close,
+  completed,
+}: {
+  business: Business;
+  close(): void;
+  completed(): Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [reason, setReason] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'INSTANT' | 'POSTPAID'>(
+    business.paymentMethod === 'POSTPAID' ? 'POSTPAID' : 'INSTANT',
+  );
+  const [creditLimit, setCreditLimit] = useState('');
+  const [billingCycle, setBillingCycle] = useState<'WEEKLY' | 'MONTHLY' | 'CUSTOM'>('MONTHLY');
+  const [paymentTermsDays, setPaymentTermsDays] = useState('30');
+  const postpaidReady =
+    paymentMethod === 'INSTANT' ||
+    (creditLimit.trim() !== '' && Number(creditLimit) >= 0 && !Number.isNaN(Number(creditLimit)));
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Set business payment terms"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!postpaidReady) {
+            setError('creditLimit is required when enabling POSTPAID');
+            return;
+          }
+          setBusy(true);
+          setError('');
+          const payload: Record<string, unknown> = {
+            businessId: business.id,
+            paymentMethod,
+          };
+          if (paymentMethod === 'POSTPAID') {
+            payload.creditLimit = Number(creditLimit);
+            payload.billingCycle = billingCycle;
+            const days = Number(paymentTermsDays);
+            if (days > 0) payload.paymentTermsDays = days;
+          }
+          void api
+            .mutate('business-as-a-service', 'businesses-payment-terms', reason, payload)
+            .then(completed)
+            .catch((cause) =>
+              setError(cause instanceof Error ? cause.message : 'Payment terms update failed'),
+            )
+            .finally(() => setBusy(false));
+        }}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Payment terms</p>
+            <h2>{business.name}</h2>
+          </div>
+          <button type="button" className="icon-control" onClick={close}>
+            ×
+          </button>
+        </header>
+        {error && <div className="form-error">{error}</div>}
+        <p className="risk-note">
+          Prepaid (INSTANT) is the default. Postpaid requires admin enablement; order confirm posts
+          BAS liability only and skips pepsa-payment debit until invoice settlement.
+        </p>
+        <label>
+          Payment method
+          <select
+            value={paymentMethod}
+            onChange={(event) => setPaymentMethod(event.target.value as 'INSTANT' | 'POSTPAID')}
+          >
+            <option value="INSTANT">INSTANT (prepaid)</option>
+            <option value="POSTPAID">POSTPAID (admin credit)</option>
+          </select>
+        </label>
+        {paymentMethod === 'POSTPAID' && (
+          <>
+            <label>
+              Credit limit (NGN)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                required
+                value={creditLimit}
+                onChange={(event) => setCreditLimit(event.target.value)}
+              />
+            </label>
+            <label>
+              Billing cycle
+              <select
+                value={billingCycle}
+                onChange={(event) =>
+                  setBillingCycle(event.target.value as 'WEEKLY' | 'MONTHLY' | 'CUSTOM')
+                }
+              >
+                <option value="WEEKLY">WEEKLY</option>
+                <option value="MONTHLY">MONTHLY</option>
+                <option value="CUSTOM">CUSTOM</option>
+              </select>
+            </label>
+            <label>
+              Payment terms (days)
+              <input
+                type="number"
+                min="1"
+                max="365"
+                value={paymentTermsDays}
+                onChange={(event) => setPaymentTermsDays(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <label>
+          Business reason
+          <textarea
+            minLength={8}
+            required
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <footer>
+          <button type="button" className="button secondary" onClick={close}>
+            Cancel
+          </button>
+          <button
+            className="button danger"
+            disabled={busy || reason.trim().length < 8 || !postpaidReady}
+          >
+            {busy ? 'Saving…' : 'Save payment terms'}
+          </button>
         </footer>
       </form>
     </div>

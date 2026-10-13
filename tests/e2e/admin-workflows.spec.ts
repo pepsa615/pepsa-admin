@@ -52,6 +52,12 @@ async function mockSharedApi(page: Page, permissions: string[], initiallyAuthent
               permission: 'bas.businesses.read',
               risk: 'medium',
             },
+            {
+              key: 'businesses-payment-terms',
+              method: 'POST',
+              permission: 'bas.businesses.review',
+              risk: 'high',
+            },
           ],
         },
       });
