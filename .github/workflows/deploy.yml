@@ -25,6 +25,12 @@ jobs:
       group: deploy-admin-frontend-staging
       cancel-in-progress: false
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Block malicious and obfuscated code
+        run: bash scripts/check-malicious-code.sh
+
       - name: Deploy admin frontend to staging
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -51,6 +57,12 @@ jobs:
       group: deploy-admin-frontend-production
       cancel-in-progress: false
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Block malicious and obfuscated code
+        run: bash scripts/check-malicious-code.sh
+
       - name: Deploy admin frontend to production
         uses: appleboy/ssh-action@v1.2.0
         with:
