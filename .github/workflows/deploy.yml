@@ -40,7 +40,7 @@ jobs:
             git fetch origin staging
             git reset --hard origin/staging
             PEPSA_STATIC_ROOT="$deploy_root" bash deploy/scripts/remote-deploy.sh
-            
+
   deploy-production:
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||

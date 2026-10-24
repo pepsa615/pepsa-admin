@@ -69,6 +69,24 @@ const paymentNavigation = [
     'kyc-rotate-encryption',
   ],
 ] as const;
+const vendorNavigation = [
+  ['/p/vendor/overview', 'Vendor overview', 'vendor.dashboard.read', 'overview-read'],
+  ['/p/vendor/vendors', 'Vendors', 'vendor.businesses.read', 'vendors-list'],
+  ['/p/vendor/reviews', 'Business reviews', 'vendor.businesses.review', 'vendors-list'],
+  ['/p/vendor/dispatchers', 'Dispatcher reviews', 'vendor.dispatchers.review', 'vendors-list'],
+  ['/p/vendor/operations', 'Operations', 'vendor.operations.read', 'overview-read'],
+  ['/p/vendor/performance', 'Performance', 'vendor.performance.read', 'performance-read'],
+  ['/p/vendor/finance', 'Finance', 'vendor.finance.read', 'overview-read'],
+  [
+    '/p/vendor/provisioning',
+    'Payment provisioning',
+    'vendor.integrations.payment.read',
+    'provisioning-list',
+  ],
+  ['/p/vendor/fees', 'Fee policies', 'vendor.fees.read', 'fee-policies-list'],
+  ['/p/vendor/exceptions', 'Exceptions', 'vendor.exceptions.operate', 'provisioning-list'],
+  ['/p/vendor/audit', 'Vendor audit', 'vendor.audit.read', 'overview-read'],
+] as const;
 
 export function AppShell() {
   const auth = useAuth();
@@ -152,6 +170,14 @@ export function AppShell() {
               ))}
           {selectedPlatform?.key === 'pepsa-payment' &&
             paymentNavigation
+              .filter(([, , permission, operation]) => navVisible(permission, operation))
+              .map(([to, label]) => (
+                <NavLink key={to} to={to}>
+                  {label}
+                </NavLink>
+              ))}
+          {selectedPlatform?.key === 'vendor' &&
+            vendorNavigation
               .filter(([, , permission, operation]) => navVisible(permission, operation))
               .map(([to, label]) => (
                 <NavLink key={to} to={to}>

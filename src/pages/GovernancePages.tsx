@@ -22,12 +22,14 @@ export function ApprovalsPage() {
     setError('');
     const form = new FormData(event.currentTarget);
     try {
-      const payloadText = String(form.get('payload') || '{}');
       await api.requestApproval({
         action: String(form.get('action')),
         riskLevel: String(form.get('riskLevel')) as 'HIGH' | 'CRITICAL',
         reason: String(form.get('reason')),
-        payload: JSON.parse(payloadText) as Record<string, unknown>,
+        payload: {
+          targetId: String(form.get('targetId') || '').trim(),
+          platformKey: String(form.get('platformKey') || '').trim(),
+        },
         approvalsRequired: Number(form.get('approvalsRequired')),
         expiresAt: new Date(Date.now() + Number(form.get('duration')) * 60_000).toISOString(),
       });
@@ -154,8 +156,12 @@ export function ApprovalsPage() {
               </select>
             </label>
             <label>
-              Payload (JSON)
-              <textarea name="payload" defaultValue="{}" />
+              Platform key
+              <input name="platformKey" placeholder="vendor" />
+            </label>
+            <label>
+              Target resource ID
+              <input name="targetId" placeholder="Resource or operation identifier" />
             </label>
             <label>
               Business reason
@@ -219,7 +225,7 @@ function ApprovalDecision({
           </button>
         </header>
         <p>{approval.reason}</p>
-        <pre className="payload-preview">{JSON.stringify(approval.payload, null, 2)}</pre>
+        <ApprovalSummary approval={approval} />
         {error && <div className="form-error">{error}</div>}
         <label>
           Decision reason
@@ -255,6 +261,47 @@ function ApprovalDecision({
         </footer>
       </div>
     </div>
+  );
+}
+
+function ApprovalSummary({ approval }: { approval: Approval }) {
+  const payload = approval.payload;
+  const nested =
+    payload.payload && typeof payload.payload === 'object'
+      ? (payload.payload as Record<string, unknown>)
+      : undefined;
+  const operation = typeof payload.operation === 'string' ? payload.operation : approval.action;
+  const platform =
+    typeof payload.platformKey === 'string'
+      ? payload.platformKey
+      : typeof nested?.platformKey === 'string'
+        ? nested.platformKey
+        : (approval.platform?.name ?? 'Control plane');
+  const target = [
+    payload.targetId,
+    nested?.vendorId,
+    nested?.platformId,
+    nested?.permissionId,
+    nested?.credentialId,
+  ].find((value): value is string => typeof value === 'string' && value.length > 0);
+  return (
+    <section className="review-section" aria-label="Approval scope">
+      <h3>Requested change</h3>
+      <dl className="review-details">
+        <div>
+          <dt>Operation</dt>
+          <dd>{titleCase(operation)}</dd>
+        </div>
+        <div>
+          <dt>Platform</dt>
+          <dd>{titleCase(platform)}</dd>
+        </div>
+        <div>
+          <dt>Target</dt>
+          <dd>{target ?? 'No specific resource'}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

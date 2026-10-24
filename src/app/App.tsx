@@ -40,6 +40,15 @@ import { PlatformsPage } from '../pages/PlatformsPage.js';
 import { RolesPage } from '../pages/RolesPage.js';
 import { AccessReviewsPage, ApprovalsPage, EmergencyAccessPage } from '../pages/GovernancePages.js';
 import { ProfilePage } from '../pages/ProfilePage.js';
+import {
+  VendorDetailPage,
+  VendorDirectoryPage,
+  VendorFeesPage,
+  VendorOperationsPage,
+  VendorOverviewPage,
+  VendorPerformancePage,
+  VendorProvisioningPage,
+} from '../pages/VendorPages.js';
 import { AuthProvider, useAuth } from './AuthContext.js';
 
 function ProtectedRoutes() {
@@ -313,6 +322,102 @@ export function App() {
             element={
               <PermissionRoute permission="payment.kyc.encryption.rotate">
                 <PaymentKycPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/overview"
+            element={
+              <PermissionRoute permission="vendor.dashboard.read">
+                <VendorOverviewPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/vendors"
+            element={
+              <PermissionRoute permission="vendor.businesses.read">
+                <VendorDirectoryPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/vendors/:vendorId"
+            element={
+              <PermissionRoute permission="vendor.businesses.read">
+                <VendorDetailPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/reviews"
+            element={
+              <PermissionRoute permission="vendor.businesses.review">
+                <VendorOperationsPage view="reviews" />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/dispatchers"
+            element={
+              <PermissionRoute permission="vendor.dispatchers.review">
+                <VendorOperationsPage view="dispatchers" />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/operations"
+            element={
+              <PermissionRoute permission="vendor.operations.read">
+                <VendorOperationsPage view="operations" />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/performance"
+            element={
+              <PermissionRoute permission="vendor.performance.read">
+                <VendorPerformancePage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/finance"
+            element={
+              <PermissionRoute permission="vendor.finance.read">
+                <VendorOperationsPage view="finance" />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/provisioning"
+            element={
+              <PermissionRoute permission="vendor.integrations.payment.read">
+                <VendorProvisioningPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/fees"
+            element={
+              <PermissionRoute permission="vendor.fees.read">
+                <VendorFeesPage />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/exceptions"
+            element={
+              <PermissionRoute permission="vendor.exceptions.operate">
+                <VendorOperationsPage view="exceptions" />
+              </PermissionRoute>
+            }
+          />
+          <Route
+            path="p/vendor/audit"
+            element={
+              <PermissionRoute permission="vendor.audit.read">
+                <VendorOperationsPage view="audit" />
               </PermissionRoute>
             }
           />
