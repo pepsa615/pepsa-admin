@@ -8,5 +8,9 @@ export const formatMoney = (value: number, currency = 'NGN') =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency, maximumFractionDigits: 0 }).format(
     value,
   );
-export const titleCase = (value: string) =>
-  value.toLowerCase().replace(/(^|[._-])\w/g, (match) => match.replace(/[._-]/, ' ').toUpperCase());
+export const titleCase = (value?: string | null) =>
+  value
+    ? value
+        .toLowerCase()
+        .replace(/(^|[._-])\w/g, (match) => match.replace(/[._-]/, ' ').toUpperCase())
+    : 'Unknown';
