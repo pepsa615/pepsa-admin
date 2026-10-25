@@ -63,13 +63,18 @@ type FeePolicy = {
   vendor?: { businessName: string };
 };
 type FeeSimulation = {
-  policyId: string;
-  version: number;
-  calculationType: string;
-  baseAmountMinor: number;
   amountMinor: number;
   currency: string;
-  contentHash: string;
+  deferralAllowed: boolean;
+  snapshot: {
+    policyVersionId: string;
+    version: number;
+    calculationType: string;
+    baseAmountMinor: number;
+    amountMinor: number;
+    currency: string;
+    contentHash: string;
+  };
 };
 type VendorDetail = VendorRow & {
   updatedAt: string;
@@ -1001,16 +1006,16 @@ export function VendorFeesPage() {
             </div>
             <div>
               <dt>Policy version</dt>
-              <dd>v{simulation.version}</dd>
+              <dd>v{simulation.snapshot.version}</dd>
             </div>
             <div>
               <dt>Calculation</dt>
-              <dd>{titleCase(simulation.calculationType)}</dd>
+              <dd>{titleCase(simulation.snapshot.calculationType)}</dd>
             </div>
             <div>
               <dt>Immutable snapshot</dt>
               <dd>
-                <code>{simulation.contentHash.slice(0, 12)}</code>
+                <code>{simulation.snapshot.contentHash.slice(0, 12)}</code>
               </dd>
             </div>
           </dl>
