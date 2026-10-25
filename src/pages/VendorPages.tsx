@@ -192,6 +192,74 @@ type DispatcherReviewRow = {
   submittedAt?: string;
   dispatcher: { vendor: { businessName: string } };
 };
+type ReviewDocument = {
+  id: string;
+  documentType: string;
+  originalName: string;
+  status: string;
+};
+type VendorApplicationDetail = {
+  id: string;
+  version: number;
+  status: string;
+  submittedAt?: string;
+  vendor: { businessName: string; type: string; email: string; phone: string };
+  personalData: Record<
+    | 'firstName'
+    | 'lastName'
+    | 'gender'
+    | 'dateOfBirth'
+    | 'phone'
+    | 'homeAddress'
+    | 'state'
+    | 'city',
+    string | undefined
+  >;
+  businessData: Record<
+    | 'legalName'
+    | 'registrationType'
+    | 'registrationDate'
+    | 'registrationNumber'
+    | 'taxNumber'
+    | 'registeredAddress'
+    | 'businessAddress'
+    | 'state'
+    | 'city',
+    string | undefined
+  >;
+  directors: Array<{
+    id: string;
+    firstName: string;
+    lastName: string;
+    phone: string;
+    role: string;
+    ownershipShare: string;
+  }>;
+  documents: ReviewDocument[];
+};
+type DispatcherReviewDetail = {
+  id: string;
+  status: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: string;
+  identityType: string;
+  homeAddress: string;
+  state: string;
+  city: string;
+  engagementType: string;
+  vehicleType: string;
+  vehicleBrand?: string;
+  plateNumber?: string;
+  guarantorName: string;
+  guarantorPhone: string;
+  revenueSharePct: string;
+  documents?: ReviewDocument[];
+  dispatcher: { tenantId: string };
+};
 type Workbench = WorkbenchBase & {
   orders?: OperationRow[];
   dispatches?: OperationRow[];
@@ -1146,6 +1214,7 @@ function WorkbenchTable({
     payload: Record<string, unknown>;
   }>();
   const [message, setMessage] = useState('');
+  const [detail, setDetail] = useState<{ kind: 'vendor' | 'dispatcher'; id: string }>();
   const actionModal = pendingAction ? (
     <ReasonModal
       title={pendingAction.title}
@@ -1156,6 +1225,16 @@ function WorkbenchTable({
         await api.mutate(PLATFORM, pendingAction.operation, reason, pendingAction.payload);
         setMessage(`${pendingAction.title} completed.`);
         setPendingAction(undefined);
+      }}
+    />
+  ) : null;
+  const detailModal = detail ? (
+    <ReviewDetailModal
+      selection={detail}
+      close={() => setDetail(undefined)}
+      decide={(operation, title, payload) => {
+        setDetail(undefined);
+        setPendingAction({ operation, title, payload });
       }}
     />
   ) : null;
@@ -1424,6 +1503,12 @@ function WorkbenchTable({
                     <div className="inline-actions">
                       <button
                         className="text-link"
+                        onClick={() => setDetail({ kind: 'vendor', id: row.id })}
+                      >
+                        View details
+                      </button>
+                      <button
+                        className="text-link"
                         onClick={() =>
                           setPendingAction({
                             operation: 'vendor-application-review',
@@ -1463,44 +1548,303 @@ function WorkbenchTable({
           </p>
         ) : null}
         {actionModal}
+        {detailModal}
       </>
     ) : (
       <EmptyState title="No business reviews" description="The business review queue is clear." />
     );
   }
   return data.revisions?.length ? (
-    <div className="table-panel">
-      <table aria-label="Dispatcher reviews">
-        <thead>
-          <tr>
-            <th>Dispatcher</th>
-            <th>Vendor</th>
-            <th>Engagement</th>
-            <th>Vehicle</th>
-            <th>Status</th>
-            <th>Submitted</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.revisions.map((row) => (
-            <tr key={row.id}>
-              <td>
-                {row.firstName} {row.lastName}
-              </td>
-              <td>{row.dispatcher.vendor.businessName}</td>
-              <td>{titleCase(row.engagementType)}</td>
-              <td>{titleCase(row.vehicleType)}</td>
-              <td>
-                <StatusBadge value={row.status} />
-              </td>
-              <td>{row.submittedAt ? formatDate(row.submittedAt) : 'Not submitted'}</td>
+    <>
+      <div className="table-panel">
+        <table aria-label="Dispatcher reviews">
+          <thead>
+            <tr>
+              <th>Dispatcher</th>
+              <th>Vendor</th>
+              <th>Engagement</th>
+              <th>Vehicle</th>
+              <th>Status</th>
+              <th>Submitted</th>
+              <th>Review</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {data.revisions.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  {row.firstName} {row.lastName}
+                </td>
+                <td>{row.dispatcher.vendor.businessName}</td>
+                <td>{titleCase(row.engagementType)}</td>
+                <td>{titleCase(row.vehicleType)}</td>
+                <td>
+                  <StatusBadge value={row.status} />
+                </td>
+                <td>{row.submittedAt ? formatDate(row.submittedAt) : 'Not submitted'}</td>
+                <td>
+                  <button
+                    className="text-link"
+                    onClick={() => setDetail({ kind: 'dispatcher', id: row.id })}
+                  >
+                    View details
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {message ? (
+        <p role="status" className="notice">
+          {message}
+        </p>
+      ) : null}
+      {actionModal}
+      {detailModal}
+    </>
   ) : (
     <EmptyState title="No dispatcher reviews" description="The dispatcher review queue is clear." />
+  );
+}
+
+function ReviewDetailModal({
+  selection,
+  close,
+  decide,
+}: {
+  selection: { kind: 'vendor' | 'dispatcher'; id: string };
+  close(): void;
+  decide(operation: string, title: string, payload: Record<string, unknown>): void;
+}) {
+  const operation =
+    selection.kind === 'vendor' ? 'vendor-application-detail' : 'dispatcher-review-detail';
+  const parameter = selection.kind === 'vendor' ? 'applicationId' : 'revisionId';
+  const detail = useAsync(
+    () =>
+      api.operation<VendorApplicationDetail | DispatcherReviewDetail>(
+        PLATFORM,
+        operation,
+        `?${parameter}=${encodeURIComponent(selection.id)}`,
+      ),
+    [operation, parameter, selection.id],
+  );
+  const openDocument = async (documentId: string) => {
+    const documentOperation =
+      selection.kind === 'vendor' ? 'vendor-application-document' : 'dispatcher-review-document';
+    const result = await api.operation<{ url: string }>(
+      PLATFORM,
+      documentOperation,
+      `?${parameter}=${encodeURIComponent(selection.id)}&documentId=${encodeURIComponent(documentId)}`,
+    );
+    window.open(result.url, '_blank', 'noopener,noreferrer');
+  };
+  const value = detail.data;
+  const vendor =
+    selection.kind === 'vendor' ? (value as VendorApplicationDetail | undefined) : undefined;
+  const dispatcher =
+    selection.kind === 'dispatcher' ? (value as DispatcherReviewDetail | undefined) : undefined;
+  const documents = vendor?.documents ?? dispatcher?.documents ?? [];
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="modal modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Review submitted details"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Approval review</p>
+            <h2>
+              {vendor?.vendor.businessName ??
+                (dispatcher
+                  ? `${dispatcher.firstName} ${dispatcher.lastName}`
+                  : 'Submitted details')}
+            </h2>
+          </div>
+          <button className="icon-control" onClick={close} aria-label="Close review details">
+            ×
+          </button>
+        </header>
+        {detail.loading ? (
+          <LoadingState />
+        ) : detail.error ? (
+          <ErrorState error={detail.error} retry={detail.reload} />
+        ) : value ? (
+          <>
+            <div className="table-panel">
+              <table aria-label="Submitted profile details">
+                <tbody>
+                  {(vendor
+                    ? [
+                        ['Business type', vendor.vendor.type],
+                        ['Email', vendor.vendor.email],
+                        ['Phone', vendor.vendor.phone],
+                        ['Legal name', vendor.businessData.legalName],
+                        ['Registration type', vendor.businessData.registrationType],
+                        ['Registration number', vendor.businessData.registrationNumber],
+                        ['Tax number', vendor.businessData.taxNumber],
+                        ['Registered address', vendor.businessData.registeredAddress],
+                        ['Operating address', vendor.businessData.businessAddress],
+                        [
+                          'State / city',
+                          [vendor.businessData.state, vendor.businessData.city]
+                            .filter(Boolean)
+                            .join(', '),
+                        ],
+                      ]
+                    : [
+                        ['Email', dispatcher?.email],
+                        ['Phone', dispatcher?.phone],
+                        [
+                          'Date of birth',
+                          dispatcher?.dateOfBirth ? formatDate(dispatcher.dateOfBirth) : undefined,
+                        ],
+                        ['Gender', dispatcher?.gender],
+                        ['Identity type', dispatcher?.identityType],
+                        ['Address', dispatcher?.homeAddress],
+                        [
+                          'State / city',
+                          [dispatcher?.state, dispatcher?.city].filter(Boolean).join(', '),
+                        ],
+                        ['Engagement', dispatcher?.engagementType],
+                        [
+                          'Vehicle',
+                          [
+                            dispatcher?.vehicleBrand,
+                            dispatcher?.vehicleType,
+                            dispatcher?.plateNumber,
+                          ]
+                            .filter(Boolean)
+                            .join(' · '),
+                        ],
+                        [
+                          'Guarantor',
+                          [dispatcher?.guarantorName, dispatcher?.guarantorPhone]
+                            .filter(Boolean)
+                            .join(' · '),
+                        ],
+                        ['Revenue share', `${dispatcher?.revenueSharePct}%`],
+                      ]
+                  ).map(([label, field]) => (
+                    <tr key={label}>
+                      <th>{label}</th>
+                      <td>{field ? titleCase(String(field)) : 'Not provided'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {vendor?.directors.length ? (
+              <div>
+                <h3>Directors</h3>
+                <div className="table-panel">
+                  <table aria-label="Submitted directors">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Phone</th>
+                        <th>Ownership</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vendor.directors.map((director) => (
+                        <tr key={director.id}>
+                          <td>
+                            {director.firstName} {director.lastName}
+                          </td>
+                          <td>{titleCase(director.role)}</td>
+                          <td>{director.phone}</td>
+                          <td>{director.ownershipShare}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+            <div>
+              <h3>Documents</h3>
+              {documents.length ? (
+                <div className="table-panel">
+                  <table aria-label="Submitted documents">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>File</th>
+                        <th>Status</th>
+                        <th>Access</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {documents.map((document) => (
+                        <tr key={document.id}>
+                          <td>{titleCase(document.documentType)}</td>
+                          <td>{document.originalName}</td>
+                          <td>
+                            <StatusBadge value={document.status} />
+                          </td>
+                          <td>
+                            <button
+                              className="text-link"
+                              onClick={() => void openDocument(document.id)}
+                            >
+                              View document
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted">No documents submitted.</p>
+              )}
+            </div>
+            <footer>
+              <button className="button secondary" onClick={close}>
+                Close
+              </button>
+              <button
+                className="button danger"
+                onClick={() =>
+                  decide(
+                    selection.kind === 'vendor' ? 'vendor-application-review' : 'dispatcher-review',
+                    'Request correction',
+                    {
+                      [parameter]: selection.id,
+                      decision: 'REJECT',
+                      correctionFields: ['APPLICATION_DETAILS'],
+                    },
+                  )
+                }
+              >
+                Request correction
+              </button>
+              <button
+                className="button primary"
+                onClick={() =>
+                  decide(
+                    selection.kind === 'vendor' ? 'vendor-application-review' : 'dispatcher-review',
+                    'Approve submission',
+                    { [parameter]: selection.id, decision: 'APPROVE' },
+                  )
+                }
+              >
+                Approve
+              </button>
+            </footer>
+          </>
+        ) : (
+          <EmptyState
+            title="Details unavailable"
+            description="The submitted record could not be loaded."
+          />
+        )}
+      </section>
+    </div>
   );
 }
 
