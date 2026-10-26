@@ -242,6 +242,76 @@ type VendorApplicationDetail = {
   }>;
   documents: ReviewDocument[];
 };
+type SubmittedField = { label: string; value: string };
+
+function submittedVendorFields(application: VendorApplicationDetail): SubmittedField[] {
+  const common = [
+    { label: 'Vendor type', value: titleCase(application.vendor.type) },
+    { label: 'Account email', value: application.vendor.email },
+    { label: 'Account phone', value: application.vendor.phone },
+  ];
+  const profile =
+    application.vendor.type === 'INDIVIDUAL'
+      ? [
+          {
+            label: 'Full name',
+            value: [application.personalData.firstName, application.personalData.lastName]
+              .filter(Boolean)
+              .join(' '),
+          },
+          {
+            label: 'Gender',
+            value: application.personalData.gender
+              ? titleCase(application.personalData.gender)
+              : '',
+          },
+          { label: 'Date of birth', value: application.personalData.dateOfBirth ?? '' },
+          { label: 'Personal phone', value: application.personalData.phone ?? '' },
+          { label: 'Home address', value: application.personalData.homeAddress ?? '' },
+          {
+            label: 'State / city',
+            value: [application.personalData.state, application.personalData.city]
+              .filter(Boolean)
+              .join(', '),
+          },
+        ]
+      : [
+          {
+            label: 'Legal name',
+            value: application.businessData.legalName ?? application.vendor.businessName,
+          },
+          {
+            label: 'Registration type',
+            value: application.businessData.registrationType
+              ? titleCase(application.businessData.registrationType)
+              : '',
+          },
+          {
+            label: 'Registration date',
+            value: application.businessData.registrationDate ?? '',
+          },
+          {
+            label: 'Registration number',
+            value: application.businessData.registrationNumber ?? '',
+          },
+          { label: 'Tax number', value: application.businessData.taxNumber ?? '' },
+          {
+            label: 'Registered address',
+            value: application.businessData.registeredAddress ?? '',
+          },
+          {
+            label: 'Operating address',
+            value: application.businessData.businessAddress ?? '',
+          },
+          {
+            label: 'State / city',
+            value: [application.businessData.state, application.businessData.city]
+              .filter(Boolean)
+              .join(', '),
+          },
+        ];
+  return [...common, ...profile].filter(({ value }) => value.trim().length > 0);
+}
 type DispatcherReviewDetail = {
   id: string;
   status: string;
@@ -1650,6 +1720,7 @@ function ReviewDetailModal({
   const dispatcher =
     selection.kind === 'dispatcher' ? (value as DispatcherReviewDetail | undefined) : undefined;
   const documents = vendor?.documents ?? dispatcher?.documents ?? [];
+  const vendorFields = vendor ? submittedVendorFields(vendor) : [];
   return (
     <div className="modal-backdrop" role="presentation">
       <section
@@ -1682,23 +1753,7 @@ function ReviewDetailModal({
               <table aria-label="Submitted profile details">
                 <tbody>
                   {(vendor
-                    ? [
-                        ['Business type', vendor.vendor.type],
-                        ['Email', vendor.vendor.email],
-                        ['Phone', vendor.vendor.phone],
-                        ['Legal name', vendor.businessData.legalName],
-                        ['Registration type', vendor.businessData.registrationType],
-                        ['Registration number', vendor.businessData.registrationNumber],
-                        ['Tax number', vendor.businessData.taxNumber],
-                        ['Registered address', vendor.businessData.registeredAddress],
-                        ['Operating address', vendor.businessData.businessAddress],
-                        [
-                          'State / city',
-                          [vendor.businessData.state, vendor.businessData.city]
-                            .filter(Boolean)
-                            .join(', '),
-                        ],
-                      ]
+                    ? vendorFields.map(({ label, value: field }) => [label, field])
                     : [
                         ['Email', dispatcher?.email],
                         ['Phone', dispatcher?.phone],
@@ -1706,14 +1761,20 @@ function ReviewDetailModal({
                           'Date of birth',
                           dispatcher?.dateOfBirth ? formatDate(dispatcher.dateOfBirth) : undefined,
                         ],
-                        ['Gender', dispatcher?.gender],
-                        ['Identity type', dispatcher?.identityType],
+                        ['Gender', dispatcher?.gender ? titleCase(dispatcher.gender) : ''],
+                        [
+                          'Identity type',
+                          dispatcher?.identityType ? titleCase(dispatcher.identityType) : '',
+                        ],
                         ['Address', dispatcher?.homeAddress],
                         [
                           'State / city',
                           [dispatcher?.state, dispatcher?.city].filter(Boolean).join(', '),
                         ],
-                        ['Engagement', dispatcher?.engagementType],
+                        [
+                          'Engagement',
+                          dispatcher?.engagementType ? titleCase(dispatcher.engagementType) : '',
+                        ],
                         [
                           'Vehicle',
                           [
@@ -1730,12 +1791,15 @@ function ReviewDetailModal({
                             .filter(Boolean)
                             .join(' · '),
                         ],
-                        ['Revenue share', `${dispatcher?.revenueSharePct}%`],
-                      ]
+                        [
+                          'Revenue share',
+                          dispatcher?.revenueSharePct ? `${dispatcher.revenueSharePct}%` : '',
+                        ],
+                      ].filter(([, field]) => Boolean(field))
                   ).map(([label, field]) => (
                     <tr key={label}>
                       <th>{label}</th>
-                      <td>{field ? titleCase(String(field)) : 'Not provided'}</td>
+                      <td>{String(field)}</td>
                     </tr>
                   ))}
                 </tbody>
