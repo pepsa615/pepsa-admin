@@ -331,6 +331,8 @@ type DispatcherReviewDetail = {
   plateNumber?: string;
   guarantorName: string;
   guarantorPhone: string;
+  guarantorNinMasked?: string | null;
+  guarantorAddress: string;
   revenueSharePct: string;
   documents?: ReviewDocument[];
   dispatcher: { tenantId: string };
@@ -1268,11 +1270,127 @@ export function VendorOperationsPage({
             {formatDate(data.data.asOf)}
           </p>
           <WorkbenchTable view={view} data={data.data} />
+          {view === 'dispatchers' ? <RiderProvisioningPanel /> : null}
         </>
       ) : (
         <EmptyState title="No data available" description="No records match this view." />
       )}
     </Page>
+  );
+}
+
+type RiderProvisioningRow = {
+  id: string;
+  dispatcherId: string;
+  revisionId: string;
+  status: string;
+  attempts: number;
+  lastErrorCode?: string | null;
+  lastRequestId?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
+  dispatcher: {
+    id: string;
+    riderUserId?: string | null;
+    riderProvisioningStatus: string;
+    riderAccountStatus?: string | null;
+    latestRevision?: { firstName: string; lastName: string; phone: string } | null;
+    vendor: { businessName: string };
+  };
+};
+
+function RiderProvisioningPanel() {
+  const rows = useAsync(
+    () => api.operation<RiderProvisioningRow[]>(PLATFORM, 'rider-provisioning-list'),
+    [],
+  );
+  const [retry, setRetry] = useState<RiderProvisioningRow>();
+  const [message, setMessage] = useState('');
+  return (
+    <section aria-labelledby="rider-provisioning-title">
+      <h2 id="rider-provisioning-title">Rider account provisioning</h2>
+      <p className="muted">
+        Approved dispatchers are created in Rider automatically. Failed attempts remain safe to
+        retry and never repeat the Admin approval.
+      </p>
+      {rows.loading ? (
+        <LoadingState />
+      ) : rows.error ? (
+        <ErrorState error={rows.error} retry={rows.reload} />
+      ) : rows.data?.length ? (
+        <div className="table-panel">
+          <table aria-label="Rider account provisioning">
+            <thead>
+              <tr>
+                <th>Dispatcher</th>
+                <th>Vendor</th>
+                <th>Rider account</th>
+                <th>Status</th>
+                <th>Attempts</th>
+                <th>Last update</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.data.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    {row.dispatcher.latestRevision
+                      ? `${row.dispatcher.latestRevision.firstName} ${row.dispatcher.latestRevision.lastName}`
+                      : 'Dispatcher'}
+                  </td>
+                  <td>{row.dispatcher.vendor.businessName}</td>
+                  <td>{row.dispatcher.riderUserId ?? 'Pending creation'}</td>
+                  <td>
+                    <StatusBadge value={row.status} />
+                    {row.dispatcher.riderAccountStatus ? (
+                      <small>{titleCase(row.dispatcher.riderAccountStatus)}</small>
+                    ) : null}
+                  </td>
+                  <td>{row.attempts}</td>
+                  <td>{formatDate(row.updatedAt)}</td>
+                  <td>
+                    {['FAILED_RETRYABLE', 'MANUAL_REVIEW'].includes(row.status) ? (
+                      <button className="text-link" onClick={() => setRetry(row)}>
+                        Retry
+                      </button>
+                    ) : (
+                      <span className="muted">No action needed</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          title="No provisioning activity"
+          description="Approved dispatchers will appear here."
+        />
+      )}
+      {message ? (
+        <p role="status" className="notice">
+          {message}
+        </p>
+      ) : null}
+      {retry ? (
+        <ReasonModal
+          title="Retry rider provisioning"
+          description={`Retry account creation for ${retry.dispatcher.latestRevision?.firstName ?? 'this dispatcher'}. The existing rider identity will be reused safely.`}
+          confirmLabel="Retry provisioning"
+          onClose={() => setRetry(undefined)}
+          onSubmit={async (reason) => {
+            await api.mutate(PLATFORM, 'rider-provisioning-retry', reason, {
+              dispatcherId: retry.dispatcherId,
+            });
+            setRetry(undefined);
+            setMessage('Rider provisioning retry started.');
+            rows.reload();
+          }}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -1791,6 +1909,8 @@ function ReviewDetailModal({
                             .filter(Boolean)
                             .join(' · '),
                         ],
+                        ['Guarantor NIN', dispatcher?.guarantorNinMasked],
+                        ['Guarantor address', dispatcher?.guarantorAddress],
                         [
                           'Revenue share',
                           dispatcher?.revenueSharePct ? `${dispatcher.revenueSharePct}%` : '',
