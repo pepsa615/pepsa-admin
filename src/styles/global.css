@@ -1288,6 +1288,65 @@ td > small {
     padding: 25px;
   }
 }
+.stack-field {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.stack-field span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+}
+.banner.danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+.muted {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+.word-editor {
+  border: 1px solid var(--border, #d7dde5);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.word-editor.is-disabled {
+  opacity: 0.7;
+}
+.word-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border, #d7dde5);
+  background: #f7f8fa;
+}
+.word-canvas {
+  min-height: 360px;
+  padding: 18px 20px;
+  outline: none;
+  line-height: 1.55;
+  font-size: 0.98rem;
+  color: #1f2937;
+}
+.word-canvas h2 {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+}
+.word-canvas p,
+.word-canvas li {
+  margin: 0 0 10px;
+}
+.word-slides-json {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;

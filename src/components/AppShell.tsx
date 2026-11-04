@@ -90,6 +90,7 @@ const vendorNavigation = [
 const riderNavigation = [
   ['/p/rider/wallet-provisioning', 'Wallet provisioning', 'rider.provisioning.read', 'wallet-provisioning-list'],
   ['/p/rider/insurance-claims', 'Insurance claims', 'rider.insurance.read', 'insurance-claims-list'],
+  ['/p/rider/onboarding-documents', 'Onboarding documents', 'rider.onboarding.read', 'onboarding-documents-list'],
 ] as const;
 
 export function AppShell() {
