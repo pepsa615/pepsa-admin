@@ -50,6 +50,7 @@ import {
   VendorProvisioningPage,
 } from '../pages/VendorPages.js';
 import { AuthProvider, useAuth } from './AuthContext.js';
+import { RiderInsuranceClaimsPage, RiderWalletProvisioningPage } from '../pages/RiderPages.js';
 
 function ProtectedRoutes() {
   const auth = useAuth();
@@ -141,6 +142,9 @@ export function App() {
             }
           />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="p/rider/overview" element={<Navigate to="/p/rider/wallet-provisioning" replace />} />
+          <Route path="p/rider/wallet-provisioning" element={<PermissionRoute permission="rider.provisioning.read"><RiderWalletProvisioningPage /></PermissionRoute>} />
+          <Route path="p/rider/insurance-claims" element={<PermissionRoute permission="rider.insurance.read"><RiderInsuranceClaimsPage /></PermissionRoute>} />
           <Route
             path="p/business-as-a-service/overview"
             element={

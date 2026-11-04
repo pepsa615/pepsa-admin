@@ -87,6 +87,10 @@ const vendorNavigation = [
   ['/p/vendor/exceptions', 'Exceptions', 'vendor.exceptions.operate', 'provisioning-list'],
   ['/p/vendor/audit', 'Vendor audit', 'vendor.audit.read', 'overview-read'],
 ] as const;
+const riderNavigation = [
+  ['/p/rider/wallet-provisioning', 'Wallet provisioning', 'rider.provisioning.read', 'wallet-provisioning-list'],
+  ['/p/rider/insurance-claims', 'Insurance claims', 'rider.insurance.read', 'insurance-claims-list'],
+] as const;
 
 export function AppShell() {
   const auth = useAuth();
@@ -184,6 +188,9 @@ export function AppShell() {
                   {label}
                 </NavLink>
               ))}
+          {selectedPlatform?.key === 'rider' && riderNavigation
+            .filter(([, , permission, operation]) => navVisible(permission, operation))
+            .map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}
         </nav>
         <div className="sidebar-user">
           <span className="avatar">{auth.session?.user.name.slice(0, 2).toUpperCase()}</span>
