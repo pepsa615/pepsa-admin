@@ -6,6 +6,8 @@ import { WordDocumentEditor } from '../components/WordDocumentEditor.js';
 import { EmptyState, ErrorState, LoadingState } from '../components/States.js';
 import { api } from '../core/api.js';
 import { useAsync } from '../core/useAsync.js';
+import { INDEMNITY_HTML, INDEMNITY_TITLE } from '../content/indemnity.js';
+import { PRIVACY_HTML, PRIVACY_TITLE } from '../content/privacy.js';
 
 const PLATFORM = 'rider';
 
@@ -136,17 +138,13 @@ export function RiderOnboardingDocumentsPage() {
       return;
     }
     if (activeKey === 'PRIVACY') {
-      setTitle('Privacy Policy');
-      setBodyHtml(
-        '<h2>Pepsa Rider Privacy Policy</h2><p><strong>Effective Date:</strong> Update this template in Word style.</p><p>Describe what personal data you collect, how you use it, and rider choices.</p>',
-      );
+      setTitle(PRIVACY_TITLE);
+      setBodyHtml(PRIVACY_HTML);
       return;
     }
     if (activeKey === 'INDEMNITY') {
-      setTitle('Indemnity and Electronic Signature Consent Agreement');
-      setBodyHtml(
-        '<h2>Indemnity and Electronic Signature Consent</h2><p><strong>Effective Date:</strong> Update this template.</p><p>Explain independent contractor status, indemnity, and electronic signature acceptance.</p>',
-      );
+      setTitle(INDEMNITY_TITLE);
+      setBodyHtml(INDEMNITY_HTML);
       return;
     }
     setTitle('Terms and Condition');
