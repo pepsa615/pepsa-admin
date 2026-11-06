@@ -1012,8 +1012,15 @@ export function VendorFeesPage() {
   const [creating, setCreating] = useState(false);
   const [stepUp, setStepUp] = useState(false);
   const [message, setMessage] = useState('');
+  const [feeCode, setFeeCode] = useState<'RUNWAY_DISPATCH' | 'GENERAL_POOL_MARKUP'>(
+    'RUNWAY_DISPATCH',
+  );
   const [flatAmount, setFlatAmount] = useState('20');
+  const [percentage, setPercentage] = useState('10');
   const [effectiveFrom, setEffectiveFrom] = useState('');
+  const [simulationFeeCode, setSimulationFeeCode] = useState<
+    'RUNWAY_DISPATCH' | 'GENERAL_POOL_MARKUP'
+  >('RUNWAY_DISPATCH');
   const [simulationBase, setSimulationBase] = useState('1000');
   const [simulation, setSimulation] = useState<FeeSimulation>();
   return (
@@ -1038,8 +1045,22 @@ export function VendorFeesPage() {
         </p>
       ) : null}
       <section className="review-section" aria-labelledby="fee-simulator-title">
-        <h3 id="fee-simulator-title">Runway fee simulator</h3>
+        <h3 id="fee-simulator-title">Fee simulator</h3>
         <div className="inline-actions">
+          <label>
+            Fee code
+            <select
+              value={simulationFeeCode}
+              onChange={(event) =>
+                setSimulationFeeCode(
+                  event.target.value as 'RUNWAY_DISPATCH' | 'GENERAL_POOL_MARKUP',
+                )
+              }
+            >
+              <option value="RUNWAY_DISPATCH">Runway dispatch</option>
+              <option value="GENERAL_POOL_MARKUP">Open dispatch markup</option>
+            </select>
+          </label>
           <label>
             Operation value (NGN)
             <input
@@ -1059,7 +1080,7 @@ export function VendorFeesPage() {
                   'fee-policy-simulate',
                   'Fee policy preview for administrator',
                   {
-                    feeCode: 'RUNWAY_DISPATCH',
+                    feeCode: simulationFeeCode,
                     baseAmountMinor: Math.round(Number(simulationBase) * 100),
                     currency: 'NGN',
                   },
@@ -1156,23 +1177,26 @@ export function VendorFeesPage() {
       {stepUp ? <StepUpDialog close={() => setStepUp(false)} /> : null}
       {creating ? (
         <ReasonModal
-          title="Create Runway fee version"
+          title="Create fee version"
           description="Creates an immutable NGN platform-default draft. Activation is a separate dual-control action."
           confirmLabel="Request creation"
           onClose={() => setCreating(false)}
           onSubmit={async (reason) => {
+            const isMarkup = feeCode === 'GENERAL_POOL_MARKUP';
             const outcome = await executeCriticalOperation({
               platformKey: PLATFORM,
               operation: 'fee-policy-create',
               reason,
               payload: {
-                feeCode: 'RUNWAY_DISPATCH',
+                feeCode,
                 scope: 'PLATFORM_DEFAULT',
                 currency: 'NGN',
-                calculationType: 'FLAT',
-                flatAmountMinor: Math.round(Number(flatAmount) * 100),
+                calculationType: isMarkup ? 'PERCENTAGE' : 'FLAT',
+                ...(isMarkup
+                  ? { percentageBps: Math.round(Number(percentage) * 100) }
+                  : { flatAmountMinor: Math.round(Number(flatAmount) * 100) }),
                 roundingRule: 'HALF_UP',
-                deferralAllowed: true,
+                deferralAllowed: isMarkup ? false : true,
               },
             });
             setMessage(
@@ -1185,17 +1209,46 @@ export function VendorFeesPage() {
           }}
         >
           <label>
-            Flat amount (NGN)
-            <input
-              aria-label="Flat amount (NGN)"
-              type="number"
-              min="0"
-              step="0.01"
-              value={flatAmount}
-              onChange={(event) => setFlatAmount(event.target.value)}
-              required
-            />
+            Fee code
+            <select
+              aria-label="Fee code"
+              value={feeCode}
+              onChange={(event) =>
+                setFeeCode(event.target.value as 'RUNWAY_DISPATCH' | 'GENERAL_POOL_MARKUP')
+              }
+            >
+              <option value="RUNWAY_DISPATCH">Runway dispatch (flat)</option>
+              <option value="GENERAL_POOL_MARKUP">Open dispatch markup (%)</option>
+            </select>
           </label>
+          {feeCode === 'GENERAL_POOL_MARKUP' ? (
+            <label>
+              Pepsa cut (%)
+              <input
+                aria-label="Pepsa cut percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={percentage}
+                onChange={(event) => setPercentage(event.target.value)}
+                required
+              />
+            </label>
+          ) : (
+            <label>
+              Flat amount (NGN)
+              <input
+                aria-label="Flat amount (NGN)"
+                type="number"
+                min="0"
+                step="0.01"
+                value={flatAmount}
+                onChange={(event) => setFlatAmount(event.target.value)}
+                required
+              />
+            </label>
+          )}
         </ReasonModal>
       ) : null}
       {selected ? (
