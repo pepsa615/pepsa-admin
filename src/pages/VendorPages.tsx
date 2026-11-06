@@ -1058,7 +1058,9 @@ export function VendorFeesPage() {
               }
             >
               <option value="RUNWAY_DISPATCH">Runway dispatch</option>
-              <option value="GENERAL_POOL_MARKUP">Open dispatch markup</option>
+              <option value="GENERAL_POOL_MARKUP">
+                Open dispatch Pepsa cut (%)
+              </option>
             </select>
           </label>
           <label>
@@ -1178,7 +1180,7 @@ export function VendorFeesPage() {
       {creating ? (
         <ReasonModal
           title="Create fee version"
-          description="Creates an immutable NGN platform-default draft. Activation is a separate dual-control action."
+          description="Creates an immutable NGN platform-default draft. Open-dispatch % is Pepsa’s cut of the paid fare; the rider earns the remainder. Activation is a separate dual-control action. Mirror the same bps on pepsa-order OPEN_DISPATCH_PEPSA_FEE_BPS for BAS."
           confirmLabel="Request creation"
           onClose={() => setCreating(false)}
           onSubmit={async (reason) => {
@@ -1218,12 +1220,14 @@ export function VendorFeesPage() {
               }
             >
               <option value="RUNWAY_DISPATCH">Runway dispatch (flat)</option>
-              <option value="GENERAL_POOL_MARKUP">Open dispatch markup (%)</option>
+              <option value="GENERAL_POOL_MARKUP">
+                Open dispatch Pepsa cut (%)
+              </option>
             </select>
           </label>
           {feeCode === 'GENERAL_POOL_MARKUP' ? (
             <label>
-              Pepsa cut (%)
+              Pepsa cut of paid fare (%)
               <input
                 aria-label="Pepsa cut percent"
                 type="number"
