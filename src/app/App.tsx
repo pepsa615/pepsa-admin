@@ -28,11 +28,15 @@ import {
 import {
   PaymentCheckoutPage,
   PaymentKycPage,
-  PaymentOverviewPage,
   PaymentPlatformsPage,
   PaymentSettingsPage,
   PaymentSvaPage,
 } from '../pages/PaymentPages.js';
+import {
+  PaymentFinanceOverviewPage, PaymentLedgerPage, PaymentLeviesPage,
+  PaymentProviderEventsPage, PaymentReconciliationPage, PaymentSettlementsPage,
+  PaymentTransactionsPage,
+} from '../pages/PaymentFinancePages.js';
 import { LoginPage } from '../pages/LoginPage.js';
 import { OperationsPage } from '../pages/OperationsPage.js';
 import { OverviewPage } from '../pages/OverviewPage.js';
@@ -286,11 +290,17 @@ export function App() {
           <Route
             path="p/pepsa-payment/overview"
             element={
-              <PermissionRoute permission="payment.sva.provisioning.read">
-                <PaymentOverviewPage />
+              <PermissionRoute permission="payment.finance.read">
+                <PaymentFinanceOverviewPage />
               </PermissionRoute>
             }
           />
+          <Route path="p/pepsa-payment/transactions" element={<PermissionRoute permission="payment.transactions.read"><PaymentTransactionsPage /></PermissionRoute>} />
+          <Route path="p/pepsa-payment/ledger" element={<PermissionRoute permission="payment.ledger.read"><PaymentLedgerPage /></PermissionRoute>} />
+          <Route path="p/pepsa-payment/levies" element={<PermissionRoute permission="payment.levies.read"><PaymentLeviesPage /></PermissionRoute>} />
+          <Route path="p/pepsa-payment/reconciliation" element={<PermissionRoute permission="payment.reconciliation.read"><PaymentReconciliationPage /></PermissionRoute>} />
+          <Route path="p/pepsa-payment/settlements" element={<PermissionRoute permission="payment.settlements.read"><PaymentSettlementsPage /></PermissionRoute>} />
+          <Route path="p/pepsa-payment/provider-events" element={<PermissionRoute permission="payment.provider-events.read"><PaymentProviderEventsPage /></PermissionRoute>} />
           <Route
             path="p/pepsa-payment/platforms"
             element={
