@@ -44,10 +44,16 @@ const orderNavigation = [
 const paymentNavigation = [
   [
     '/p/pepsa-payment/overview',
-    'Payment overview',
-    'payment.sva.provisioning.read',
-    'sva-provisioning-list',
+    'Finance overview',
+    'payment.finance.read',
+    'finance-overview',
   ],
+  ['/p/pepsa-payment/transactions', 'Transactions', 'payment.transactions.read', 'finance-transactions'],
+  ['/p/pepsa-payment/ledger', 'Ledger', 'payment.ledger.read', 'finance-journals'],
+  ['/p/pepsa-payment/levies', 'Charges & levies', 'payment.levies.read', 'finance-levies'],
+  ['/p/pepsa-payment/settlements', 'Settlements', 'payment.settlements.read', 'finance-settlements'],
+  ['/p/pepsa-payment/reconciliation', 'Reconciliation', 'payment.reconciliation.read', 'finance-reconciliation'],
+  ['/p/pepsa-payment/provider-events', 'Reports & provider events', 'payment.provider-events.read', 'finance-provider-events'],
   ['/p/pepsa-payment/platforms', 'Payment platforms', 'payment.platforms.read', 'platforms-list'],
   ['/p/pepsa-payment/settings', 'Settings', 'payment.settings.transfer', 'transfer-settings-get'],
   [
