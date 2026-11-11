@@ -138,11 +138,15 @@ export interface AdminSession {
 }
 
 let csrfToken = '';
+let stepUpHandler: (() => Promise<void>) | undefined;
 export const setCsrfToken = (value: string) => {
   csrfToken = value;
 };
+export const setStepUpHandler = (handler?: () => Promise<void>) => {
+  stepUpHandler = handler;
+};
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, retriedAfterStepUp = false): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     credentials: 'include',
@@ -158,12 +162,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     data?: T;
     error?: { code?: string; message?: string };
   };
-  if (!response.ok)
-    throw new ApiError(
+  if (!response.ok) {
+    const error = new ApiError(
       response.status,
       body.error?.code ?? 'REQUEST_FAILED',
       body.error?.message ?? 'The request failed',
     );
+    if (
+      !retriedAfterStepUp &&
+      error.status === 428 &&
+      error.code === 'STEP_UP_REQUIRED' &&
+      stepUpHandler
+    ) {
+      await stepUpHandler();
+      return request<T>(path, init, true);
+    }
+    throw error;
+  }
   return body.data as T;
 }
 

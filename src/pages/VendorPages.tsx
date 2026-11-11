@@ -217,7 +217,8 @@ type VendorApplicationDetail = {
     | 'phone'
     | 'homeAddress'
     | 'state'
-    | 'city',
+    | 'city'
+    | 'identityNumber',
     string | undefined
   >;
   businessData: Record<
@@ -239,6 +240,7 @@ type VendorApplicationDetail = {
     phone: string;
     role: string;
     ownershipShare: string;
+    identityNumber?: string;
   }>;
   documents: ReviewDocument[];
 };
@@ -267,6 +269,7 @@ function submittedVendorFields(application: VendorApplicationDetail): SubmittedF
           },
           { label: 'Date of birth', value: application.personalData.dateOfBirth ?? '' },
           { label: 'Personal phone', value: application.personalData.phone ?? '' },
+          { label: 'NIN', value: application.personalData.identityNumber ?? '' },
           { label: 'Home address', value: application.personalData.homeAddress ?? '' },
           {
             label: 'State / city',
@@ -1326,7 +1329,7 @@ export function VendorOperationsPage({
             {titleCase(data.data.classification)} · {data.data.freshness} · as of{' '}
             {formatDate(data.data.asOf)}
           </p>
-          <WorkbenchTable view={view} data={data.data} />
+          <WorkbenchTable view={view} data={data.data} reload={data.reload} />
           {view === 'dispatchers' ? <RiderProvisioningPanel /> : null}
         </>
       ) : (
@@ -1454,9 +1457,11 @@ function RiderProvisioningPanel() {
 function WorkbenchTable({
   view,
   data,
+  reload,
 }: {
   view: 'operations' | 'finance' | 'exceptions' | 'audit' | 'reviews' | 'dispatchers';
   data: Workbench;
+  reload(): void;
 }) {
   const [pendingAction, setPendingAction] = useState<{
     operation: string;
@@ -1475,6 +1480,7 @@ function WorkbenchTable({
         await api.mutate(PLATFORM, pendingAction.operation, reason, pendingAction.payload);
         setMessage(`${pendingAction.title} completed.`);
         setPendingAction(undefined);
+        reload();
       }}
     />
   ) : null;
@@ -1992,6 +1998,7 @@ function ReviewDetailModal({
                         <th>Name</th>
                         <th>Role</th>
                         <th>Phone</th>
+                        <th>NIN</th>
                         <th>Ownership</th>
                       </tr>
                     </thead>
@@ -2003,6 +2010,7 @@ function ReviewDetailModal({
                           </td>
                           <td>{titleCase(director.role)}</td>
                           <td>{director.phone}</td>
+                          <td><code>{director.identityNumber ?? 'Not supplied'}</code></td>
                           <td>{director.ownershipShare}%</td>
                         </tr>
                       ))}

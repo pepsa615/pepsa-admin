@@ -7,7 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, ApiError, type Session } from '../core/api.js';
+import { api, ApiError, setStepUpHandler, type Session } from '../core/api.js';
+import { StepUpDialog } from '../components/StepUpDialog.js';
 
 interface AuthState {
   session?: Session;
@@ -24,6 +25,10 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session>();
   const [loading, setLoading] = useState(true);
+  const [stepUpPrompt, setStepUpPrompt] = useState<{
+    resolve(): void;
+    reject(error: Error): void;
+  }>();
   useEffect(() => {
     api
       .session()
@@ -35,6 +40,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!(error instanceof ApiError) || error.status !== 401) console.error(error);
       })
       .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => {
+    let active: Promise<void> | undefined;
+    setStepUpHandler(() => {
+      if (active) return active;
+      active = new Promise<void>((resolve, reject) => {
+        setStepUpPrompt({
+          resolve: () => {
+            resolve();
+            active = undefined;
+          },
+          reject: (error) => {
+            reject(error);
+            active = undefined;
+          },
+        });
+      });
+      return active;
+    });
+    return () => setStepUpHandler(undefined);
   }, []);
   const login = useCallback(
     async (email: string, password: string) => api.login(email, password),
@@ -67,7 +92,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [session, loading, login, verifyMfa, completeMfaEnrollment, stepUp, logout],
   );
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {stepUpPrompt ? (
+        <StepUpDialog
+          close={() => {
+            stepUpPrompt.reject(new ApiError(428, 'STEP_UP_CANCELLED', 'MFA verification cancelled'));
+            setStepUpPrompt(undefined);
+          }}
+          completed={() => {
+            stepUpPrompt.resolve();
+            setStepUpPrompt(undefined);
+          }}
+        />
+      ) : null}
+    </AuthContext.Provider>
+  );
 }
 
 export const useAuth = () => {
